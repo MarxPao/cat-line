@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="a11y_description">O Cat Line usa este serviço apenas para saber qual app está aberto e trancar as redes sociais que você escolheu como recompensa. Nenhum conteúdo de mensagens é enviado.</string>
+    <string name="block_title">%1$s está trancado!</string>
+    <string name="block_msg_warning">Você trancou este app para manter o foco (%1$s às %2$s). Deseja voltar ao foco ou usar uma folga?</string>
+    <string name="block_msg_friction">Respire um pouquinho. Você poderá continuar em %1$d segundos.</string>
+    <string name="block_msg_conditional">Este app está trancado! Cumpra seus compromissos de hoje ou resgate um Passe de Recompensa com Peixinhos no Cat Line para destravar.</string>
+    <string name="block_msg_firm">Trancado em modo firme até %1$s. Abra o Cat Line se precisar destravar.</string>
+    <string name="block_btn_continue">Liberar por %1$d min</string>
+    <string name="block_btn_wait">Aguarde %1$ds…</string>
+    <string name="block_btn_tasks">Abrir Cat Line (Destravar com Tarefas / Peixinhos)</string>
+    <string name="block_btn_back">Voltar ao Foco (Sair do App)</string>
+</resources>

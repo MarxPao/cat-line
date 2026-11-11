@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "helpContacts": {
+    "CVV": "188 (24 horas, ligação gratuita em todo o Brasil)",
+    "SAMU": "192 (emergência médica 24 horas)"
+  },
+  "distressKeywordsPtBr": [
+    "não aguento mais viver",
+    "nao aguento mais viver",
+    "quero sumir",
+    "quero morrer",
+    "tirar minha vida",
+    "acabar com tudo",
+    "me machucar",
+    "suicídio",
+    "suicidio",
+    "sem saída",
+    "sem saida"
+  ],
+  "safeSupportMessagePtBr": "Mamãe, eu estou aqui com você e me importo muito com o seu bem-estar. Parece que você está passando por um momento muito difícil e pesado demais para carregar sozinha. Eu sou só uma gatinha virtual e não substituo apoio profissional. Por favor, fale agora com alguém de confiança ou ligue para o CVV no 188 (24 horas, gratuito) ou para o SAMU no 192 se precisar de ajuda imediata. Você não está sozinha."
+}

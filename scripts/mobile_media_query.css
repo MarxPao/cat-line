@@ -1,0 +1,1059 @@
+/* Paleta Oficial de 16 Cores do Dead Line (DEADLINE_16_PALETTE) */
+:root {
+  --c-ink: #181425;
+  --c-fur-white: #FFFFFF;
+  --c-fur-shadow: #EAE1D3;
+  --c-gray-dark: #6B6967;
+  --c-gray-mid: #9B9793;
+  --c-orange: #DF8F49;
+  --c-orange-shadow: #B8652B;
+  --c-yarn-pink: #F0949E;
+  --c-yarn-dark: #AD5E65;
+  --c-gold: #F4C852;
+  --c-wall-cream: #F7E8D0;
+  --c-wood-floor: #D4A373;
+  --c-leaf-green: #63AB3F;
+  --c-window-blue: #4B80CA;
+  --c-cozy-purple: #5A4E7C;
+  --c-alert-red: #D95763;
+
+  --font-pixel: 'Pixelify Sans', monospace, sans-serif;
+  --font-short: 'Silkscreen', monospace, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+}
+
+body {
+  background: var(--c-ink);
+  color: var(--c-fur-white);
+  font-family: var(--font-pixel);
+  font-size: 16px;
+  min-height: 100vh;
+  min-height: 100dvh;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  overflow-x: hidden;
+}
+
+/* Moldura Centralizada do App Móvel */
+.phone-wrapper {
+  width: 100%;
+  max-width: 480px;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  margin: 0 auto;
+}
+
+.phone-frame {
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  background: var(--c-ink);
+  border: none;
+  border-radius: 0;
+  box-shadow: 0 0 32px rgba(0,0,0,0.6);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Barra de Status */
+.phone-status-bar {
+  height: 32px;
+  background: var(--c-ink);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 20px;
+  font-family: var(--font-short);
+  font-size: 13px;
+  color: var(--c-fur-white);
+  user-select: none;
+}
+
+.status-camera-punch {
+  width: 12px;
+  height: 12px;
+  background: #000;
+  border-radius: 50%;
+}
+
+.status-icons {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+}
+
+/* Tela Principal do App */
+.app-screen {
+  flex: 1;
+  background: var(--c-wall-cream);
+  color: var(--c-ink);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.app-header {
+  background: var(--c-wall-cream);
+  border-bottom: 3px solid var(--c-ink);
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.app-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.app-name {
+  font-family: var(--font-pixel);
+  font-size: 25px;
+  font-weight: 700;
+  color: var(--c-orange-shadow);
+  text-shadow: 1px 1px 0 var(--c-fur-white);
+}
+
+.app-daykey {
+  font-family: var(--font-short);
+  font-size: 13px;
+  color: var(--c-gray-dark);
+}
+
+.hud-currencies {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.hud-pill {
+  background: var(--c-fur-white);
+  border: 2px solid var(--c-ink);
+  box-shadow: 2px 2px 0 var(--c-ink);
+  padding: 4px 10px;
+  font-family: var(--font-short);
+  font-size: 14px;
+  border-radius: 4px;
+}
+
+.hud-fish strong { color: var(--c-orange); }
+.hud-golden strong { color: #b8860b; }
+.hud-bond strong { color: var(--c-cozy-purple); }
+
+/* Banner de Gracinhas do Novelo */
+.yarn-antic-strip {
+  background: #fce7eb;
+  border-bottom: 2px solid var(--c-yarn-dark);
+  padding: 6px 12px;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--c-yarn-dark);
+}
+
+.yarn-ball-icon.rolling {
+  display: inline-block;
+  font-size: 18px;
+  animation: rollBounce 3s infinite ease-in-out;
+}
+
+@keyframes rollBounce {
+  0%, 100% { transform: translateX(0) rotate(0deg); }
+  50% { transform: translateX(18px) rotate(180deg); }
+}
+
+/* Área com Scroll */
+.app-content-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Componentes Pixel Art Reutilizáveis (Cards 9-Patch) */
+.pixel-card {
+  background: var(--c-fur-white);
+  border: 3px solid var(--c-ink);
+  box-shadow: 3px 3px 0 var(--c-ink);
+  padding: 14px;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.pixel-card.cream {
+  background: var(--c-wall-cream);
+}
+
+.pixel-card h4 {
+  font-size: 17px;
+  font-family: var(--font-short);
+  margin-bottom: 8px;
+  color: var(--c-ink);
+}
+
+.pixel-card p {
+  font-size: 15px;
+  color: var(--c-ink);
+  line-height: 1.45;
+}
+
+/* Botões 8-Bit com Estado Pressionado */
+.pixel-btn {
+  background: var(--c-orange);
+  color: var(--c-fur-white);
+  border: 2px solid var(--c-ink);
+  box-shadow: 0 3px 0 var(--c-orange-shadow), 0 3px 0 var(--c-ink);
+  font-family: var(--font-short);
+  font-size: 13px;
+  padding: 8px 14px;
+  cursor: pointer;
+  border-radius: 3px;
+  text-transform: uppercase;
+  user-select: none;
+  transition: transform 0.05s, box-shadow 0.05s;
+}
+
+.pixel-btn:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 var(--c-orange-shadow), 0 1px 0 var(--c-ink);
+}
+
+.pixel-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pixel-btn.btn-sm {
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.pixel-btn.btn-green {
+  background: var(--c-leaf-green);
+  box-shadow: 0 3px 0 #437829, 0 3px 0 var(--c-ink);
+}
+
+.pixel-btn.btn-pink {
+  background: var(--c-yarn-pink);
+  color: var(--c-ink);
+  box-shadow: 0 3px 0 var(--c-yarn-dark), 0 3px 0 var(--c-ink);
+}
+
+.pixel-btn.btn-purple {
+  background: var(--c-cozy-purple);
+  box-shadow: 0 3px 0 #3b3353, 0 3px 0 var(--c-ink);
+}
+
+.pixel-btn.btn-red {
+  background: var(--c-alert-red);
+  box-shadow: 0 3px 0 #9e333d, 0 3px 0 var(--c-ink);
+}
+
+.pixel-btn.btn-gold {
+  background: var(--c-gold);
+  color: var(--c-ink);
+  box-shadow: 0 3px 0 #b38e2e, 0 3px 0 var(--c-ink);
+}
+
+/* Balão de Fala Pixel Art com Cauda (PixelSpeechBubble) */
+.speech-bubble-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  flex-shrink: 0;
+}
+
+.speech-bubble-box {
+  background: var(--c-fur-white);
+  border: 3px solid var(--c-ink);
+  box-shadow: 2px 2px 0 var(--c-ink);
+  padding: 12px 14px;
+  width: 100%;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--c-ink);
+  position: relative;
+  min-height: 56px;
+}
+
+.speech-bubble-tail {
+  width: 18px;
+  height: 10px;
+  background: var(--c-fur-white);
+  position: relative;
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  border-top: 2px solid var(--c-fur-white);
+  margin-top: -2px;
+}
+
+/* Tela Canvas da Gatinha */
+.scene-canvas-container {
+  width: 100%;
+  height: 240px;
+  min-height: 240px;
+  flex-shrink: 0;
+  background: var(--c-ink);
+  border: 3px solid var(--c-ink);
+  box-shadow: 3px 3px 0 var(--c-ink);
+  position: relative;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+#scene-canvas {
+  width: 100%;
+  height: 240px;
+  display: block;
+}
+
+.scene-click-hint {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  font-size: 12px;
+  background: rgba(24, 20, 37, 0.88);
+  color: var(--c-gold);
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-family: var(--font-pixel);
+  pointer-events: none;
+}
+
+.scene-state-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  font-size: 12px;
+  background: rgba(24, 20, 37, 0.88);
+  color: var(--c-fur-white);
+  padding: 4px 8px;
+  border-radius: 3px;
+  border: 1px solid var(--c-gold);
+  font-family: var(--font-pixel);
+  pointer-events: none;
+}
+
+/* Seletor de Novelos das Metas (Na Mão da Gatinha) */
+.goal-yarn-selector {
+  background: var(--c-fur-white);
+  border: 3px solid var(--c-ink);
+  box-shadow: 3px 3px 0 var(--c-ink);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.goal-yarn-selector-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--c-ink);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.goal-yarn-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.yarn-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 2px solid var(--c-ink);
+  background: var(--c-wall-cream);
+  cursor: pointer;
+  font-family: var(--font-pixel);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--c-ink);
+  border-radius: 4px;
+  transition: transform 0.1s;
+}
+
+.yarn-chip.selected {
+  background: #fff3cd;
+  border-width: 3px;
+  box-shadow: 2px 2px 0 var(--c-ink);
+  transform: translateY(-1px);
+}
+
+.yarn-color-dot {
+  width: 22px;
+  height: 22px;
+  display: inline-block;
+  flex-shrink: 0;
+  image-rendering: pixelated;
+}
+
+/* Novelo Winding Canvas (Novelo real enrolando o fio com animação 8-bit) */
+.novelo-bar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.novelo-bar-label {
+  font-size: 16px;
+  font-weight: 700;
+  font-family: var(--font-pixel);
+  color: var(--c-ink);
+}
+
+.novelo-bar-track-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.novelo-winding-canvas {
+  flex: 1;
+  height: 52px;
+  width: 100%;
+  display: block;
+  background: #fdf5e8;
+  border: 2px solid var(--c-ink);
+  box-shadow: inset 0 2px 0 rgba(24, 20, 37, 0.08);
+  border-radius: 4px;
+  image-rendering: pixelated;
+}
+
+/* Gráfico de Atraso do Fio (Canvas) */
+.delay-graph-canvas {
+  width: 100%;
+  height: 120px;
+  border: 2px solid var(--c-ink);
+  background: #fff8f0;
+}
+
+/* Bottom Navigation Bar com Scroll Suave e Responsividade Mobile */
+.bottom-nav {
+  min-height: 62px;
+  background: var(--c-fur-white);
+  border-top: 3px solid var(--c-ink);
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  padding: 4px 6px;
+  user-select: none;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  gap: 4px;
+}
+
+.bottom-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  color: var(--c-gray-dark);
+  font-family: var(--font-pixel);
+  font-size: 11px;
+  font-weight: 700;
+  transition: all 0.1s;
+  flex: 1 0 auto;
+  min-width: 52px;
+  text-align: center;
+}
+
+.nav-item:hover {
+  color: var(--c-ink);
+}
+
+.nav-item.active {
+  color: var(--c-orange-shadow);
+  background: #f7e8d0;
+  border: 2px solid var(--c-ink);
+  transform: translateY(-2px);
+}
+
+.nav-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+}
+
+/* Inputs Pixel Art */
+.pixel-input {
+  width: 100%;
+  padding: 8px 10px;
+  font-family: var(--font-pixel);
+  font-size: 16px;
+  border: 2px solid var(--c-ink);
+  background: var(--c-fur-white);
+  color: var(--c-ink);
+  outline: none;
+}
+
+.pixel-input:focus {
+  border-color: var(--c-orange);
+}
+
+.flex-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.space-between {
+  justify-content: space-between;
+}
+
+/* Botões utilitários de edição e descarte */
+.pixel-btn.btn-danger {
+  background: var(--c-alert-red);
+  color: var(--c-fur-white);
+  box-shadow: 0 3px 0 #8e2a34, 0 3px 0 var(--c-ink);
+}
+
+.pixel-btn.btn-secondary {
+  background: var(--c-gray-mid);
+  color: var(--c-fur-white);
+  box-shadow: 0 3px 0 var(--c-gray-dark), 0 3px 0 var(--c-ink);
+}
+
+.pixel-btn.btn-icon {
+  padding: 4px 8px;
+  font-size: 13px;
+  line-height: 1;
+}
+
+/* Caixa de edição inline com destaque 8-bit */
+.inline-edit-box {
+  background: #fff8e8;
+  border: 2px dashed var(--c-orange);
+  padding: 10px;
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-radius: 4px;
+}
+
+/* Painel de Analytics Pixel Art */
+.analytics-period-bar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.period-pill {
+  flex: 1;
+  padding: 6px 8px;
+  border: 2px solid var(--c-ink);
+  background: var(--c-fur-white);
+  font-family: var(--font-pixel);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.1s;
+}
+
+.period-pill.active {
+  background: var(--c-gold);
+  box-shadow: inset 0 -2px 0 #b8860b;
+}
+
+.analytics-stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.stat-pill-card {
+  background: var(--c-fur-white);
+  border: 2px solid var(--c-ink);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stat-pill-title {
+  font-size: 12px;
+  color: var(--c-gray-dark);
+  font-family: var(--font-short);
+}
+
+.stat-pill-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--c-orange-shadow);
+  font-family: var(--font-pixel);
+}
+
+.stat-pill-sub {
+  font-size: 11px;
+  color: var(--c-gray-dark);
+}
+
+.analytics-bar-canvas {
+  width: 100%;
+  height: 120px;
+  border: 2px solid var(--c-ink);
+  background: #fff8f0;
+  display: block;
+  image-rendering: pixelated;
+}
+
+.heatmap-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.heatmap-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.heatmap-label {
+  width: 90px;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.heatmap-track {
+  flex: 1;
+  height: 14px;
+  background: var(--c-fur-shadow);
+  border: 2px solid var(--c-ink);
+  position: relative;
+  overflow: hidden;
+}
+
+.heatmap-fill {
+  height: 100%;
+  background: var(--c-leaf-green);
+}
+
+.heatmap-val {
+  width: 48px;
+  text-align: right;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+/* Foco & Bloqueio ao Gosto da Cliente */
+.preset-chips-wrap {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 6px 0 10px 0;
+}
+
+.preset-chip-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--c-wall-cream);
+  border: 2px solid var(--c-ink);
+  box-shadow: 2px 2px 0 var(--c-ink);
+  padding: 5px 9px;
+  font-family: var(--font-pixel);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  border-radius: 4px;
+  user-select: none;
+  transition: all 0.1s;
+}
+
+.preset-chip-btn:hover {
+  background: #fff8f0;
+  transform: translateY(-1px);
+}
+
+.preset-chip-btn.active {
+  background: #fff3cd;
+  border-color: var(--c-orange-shadow);
+  box-shadow: 2px 2px 0 var(--c-orange-shadow);
+}
+
+.foco-rule-item {
+  background: var(--c-fur-white);
+  border: 2px solid var(--c-ink);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: opacity 0.2s;
+}
+
+.foco-rule-item.disabled-rule {
+  opacity: 0.65;
+  background: #f0edf7;
+}
+
+.foco-rule-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.foco-rule-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.foco-rule-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.foco-rule-desc {
+  font-size: 13px;
+  color: var(--c-gray-dark);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rigor-tag {
+  display: inline-block;
+  padding: 2px 6px;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 3px;
+  border: 1px solid var(--c-ink);
+}
+
+.rigor-tag.r0 { background: #e0e0e0; color: #333; }
+.rigor-tag.r1 { background: #d4edda; color: #155724; }
+.rigor-tag.r2 { background: #fff3cd; color: #856404; }
+.rigor-tag.r3 { background: #cce5ff; color: #004085; }
+.rigor-tag.r4 { background: #f8d7da; color: #721c24; }
+
+/* Modal da Barreira da Gatinha (Simulador de Bloqueio em Tempo Real) */
+.blocker-modal-backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(24, 20, 37, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+.blocker-modal-box {
+  background: var(--c-wall-cream);
+  border: 4px solid var(--c-ink);
+  box-shadow: 4px 4px 0 #000;
+  padding: 16px;
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: popIn 0.15s ease-out;
+}
+
+@keyframes popIn {
+  from { transform: scale(0.92); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.blocker-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 2px solid var(--c-ink);
+  padding-bottom: 8px;
+}
+
+.blocker-cat-banner {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.blocker-cat-avatar {
+  font-size: 40px;
+  background: var(--c-fur-white);
+  border: 2px solid var(--c-ink);
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.blocker-dialog-text {
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--c-ink);
+}
+
+.friction-timer-track {
+  width: 100%;
+  height: 18px;
+  background: var(--c-fur-shadow);
+  border: 2px solid var(--c-ink);
+  position: relative;
+  overflow: hidden;
+  margin: 6px 0;
+}
+
+.friction-timer-fill {
+  height: 100%;
+  background: var(--c-orange);
+  transition: width 1s linear;
+}
+
+.pending-tasks-blocker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 140px;
+  overflow-y: auto;
+  background: #fff;
+  border: 2px solid var(--c-ink);
+  padding: 8px;
+}
+
+.pending-task-blocker-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  gap: 6px;
+  border-bottom: 1px dashed #ccc;
+  padding-bottom: 4px;
+}
+
+.pending-task-blocker-row:last-child {
+  border-bottom: none;
+}
+
+/* Briefing Mensal & Planejamento de Rotina (Wizard) */
+.briefing-wizard-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: fadeIn 0.2s ease-in;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.briefing-step-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 2px solid var(--c-ink);
+  padding-bottom: 8px;
+}
+
+.briefing-progress-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.briefing-dot {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--c-ink);
+  background: var(--c-fur-white);
+  border-radius: 50%;
+}
+
+.briefing-dot.active {
+  background: var(--c-orange);
+  transform: scale(1.15);
+}
+
+.briefing-dot.done {
+  background: var(--c-leaf-green);
+}
+
+.briefing-cat-speech {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  background: #fff8f0;
+  border: 2px solid var(--c-ink);
+  padding: 10px 12px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.briefing-choices-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.briefing-choice-card {
+  background: var(--c-fur-white);
+  border: 2px solid var(--c-ink);
+  box-shadow: 2px 2px 0 var(--c-ink);
+  padding: 8px 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  user-select: none;
+  transition: all 0.1s;
+}
+
+.briefing-choice-card:hover {
+  background: #fdf5e8;
+  transform: translateY(-1px);
+}
+
+.briefing-choice-card.selected {
+  background: #fff3cd;
+  border-color: var(--c-orange-shadow);
+  box-shadow: 2px 2px 0 var(--c-orange-shadow);
+}
+
+.briefing-summary-box {
+  background: #fff8f0;
+  border: 2px solid var(--c-ink);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.briefing-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-bottom: 1px dashed #ccc;
+  padding-bottom: 6px;
+}
+
+.briefing-summary-item:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.briefing-summary-label {
+  font-size: 12px;
+  color: var(--c-gray-dark);
+  font-weight: 700;
+}
+
+.briefing-summary-val {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--c-ink);
+}
+
+/* Banner de Instalação no Celular */
+.install-banner-wrap {
+  background: var(--c-fur-white);
+  border-bottom: 3px solid var(--c-ink);
+  padding: 8px 12px;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+  animation: slideDown 0.3s ease-out;
+  position: relative;
+  z-index: 100;
+}
+
+@keyframes slideDown {
+  from { transform: translateY(-100%); }
+  to { transform: translateY(0); }
+}
+
+.install-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.install-banner-icon {
+  font-size: 24px;
+}
+
+.install-banner-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.install-banner-text strong {
+  font-size: 14px;
+  color: var(--c-ink);
+}
+
+.install-banner-text span {
+  font-size: 11px;
+  color: var(--c-gray-dark);
+}
+
+.install-banner-close {
+  background: none;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  color: var(--c-gray-dark);
+  padding: 4px;
+}
+
+.ios-install-hint-box {
+  margin-top: 6px;
+  padding: 6px 10px;
+  background: #fff3cd;
+  border: 1px dashed #856404;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #856404;
+  line-height: 1.35;
+}
+

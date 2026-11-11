@@ -1,0 +1,34 @@
+===========================================================
+  🐱 CAT LINE — GUIA DE INSTALAÇÃO DO APLICATIVO ANDROID (.APK)
+===========================================================
+
+Olá! Este arquivo (CatLine.apk) é o aplicativo instalável nativo do Cat Line para celulares Android.
+
+Ao instalar este APK:
+✓ O aplicativo fica gravado diretamente na memória do seu celular;
+✓ Um ícone oficial da gatinha ("Cat Line") aparece na tela inicial e gaveta de apps;
+✓ Abre em tela cheia (sem barra de navegador ou sensação de página web);
+✓ Funciona 100% offline, sem necessidade de internet, servidor ou nuvem;
+✓ Todos os seus dados, hábitos, rotinas e mimos ficam salvos com segurança no aparelho.
+
+-----------------------------------------------------------
+COMO INSTALAR NO CELULAR ANDROID (3 PASSOS):
+-----------------------------------------------------------
+
+1. ENVIAR PARA O CELULAR:
+   - Envie o arquivo "CatLine.apk" para o seu celular (pelo WhatsApp, Telegram, Google Drive ou cabo USB).
+
+2. TOCAR PARA INSTALAR:
+   - No celular, abra o arquivo "CatLine.apk".
+   - O Android perguntará: "Deseja instalar este aplicativo?".
+   - Toque em "Instalar".
+
+   *Nota de segurança:* Se o Android exibir a mensagem padrão de "App de fonte desconhecida" (comum para apps em fase de teste e homologação), toque em "Configurações" e marque "Permitir desta fonte" (ou "Instalar assim mesmo").
+
+3. PRONTO!
+   - O ícone do Cat Line com a gatinha calico estará pronto na sua tela inicial!
+   - Toque no ícone e aproveite todo o universo de hábitos, foco, mimos e agenda da sua gatinha!
+
+===========================================================
+🐱 Desenvolvido com amor para a cliente Cat Line!
+===========================================================

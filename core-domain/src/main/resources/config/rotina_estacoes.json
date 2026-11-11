@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "stations": [
+    {
+      "category": "ESTUDAR_LER",
+      "animationTag": "estudar_ler",
+      "stationId": "estante_livros",
+      "virtualX": 40,
+      "virtualY": 140
+    },
+    {
+      "category": "TRABALHAR",
+      "animationTag": "trabalhar",
+      "stationId": "escrivaninha_notebook",
+      "virtualX": 135,
+      "virtualY": 140
+    },
+    {
+      "category": "TREINAR",
+      "animationTag": "treinar",
+      "stationId": "tapete_treino",
+      "virtualX": 45,
+      "virtualY": 250
+    },
+    {
+      "category": "COMER",
+      "animationTag": "comer",
+      "stationId": "tigelinha_racao",
+      "virtualX": 140,
+      "virtualY": 220
+    },
+    {
+      "category": "HIGIENE",
+      "animationTag": "higiene",
+      "stationId": "cantinho_banho",
+      "virtualX": 35,
+      "virtualY": 195
+    },
+    {
+      "category": "LAZER",
+      "animationTag": "lazer",
+      "stationId": "tv_videogame",
+      "virtualX": 90,
+      "virtualY": 200
+    },
+    {
+      "category": "DORMIR",
+      "animationTag": "dormir",
+      "stationId": "caminha_gatinha",
+      "virtualX": 140,
+      "virtualY": 300
+    },
+    {
+      "category": "CUIDAR_CASA",
+      "animationTag": "cuidar_casa",
+      "stationId": "centro_comodo",
+      "virtualX": 90,
+      "virtualY": 260
+    },
+    {
+      "category": "SAIR",
+      "animationTag": "sair",
+      "stationId": "tapete_porta",
+      "virtualX": 90,
+      "virtualY": 355
+    },
+    {
+      "category": "OCIOSO",
+      "animationTag": "ociosa",
+      "stationId": "tapete_central",
+      "virtualX": 90,
+      "virtualY": 230
+    }
+  ],
+  "freeBehaviorWeightsByMood": {
+    "RADIANTE": {
+      "brincar_novelo": 40,
+      "feliz": 30,
+      "andar": 20,
+      "ociosa": 10
+    },
+    "FELIZ": {
+      "brincar_novelo": 30,
+      "feliz": 30,
+      "lamber_se": 20,
+      "ociosa": 20
+    },
+    "TRANQUILA": {
+      "ociosa": 35,
+      "lamber_se": 30,
+      "espreguicar": 20,
+      "andar": 15
+    },
+    "SONOLENTA": {
+      "sonolenta": 45,
+      "dormir": 30,
+      "espreguicar": 15,
+      "ociosa": 10
+    },
+    "MANHOSA": {
+      "manhosa": 55,
+      "ronronar": 20,
+      "ociosa": 25
+    }
+  }
+}

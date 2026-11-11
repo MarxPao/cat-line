@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "dayBoundary": {
+    "logicalDayStartHour": 4
+  },
+  "punctuality": {
+    "toleranceMinutes": 10
+  },
+  "week": {
+    "closesOn": "sunday"
+  },
+  "undoWindowMinutes": 10,
+  "rewards": {
+    "commitmentDone": { "fish": 2 },
+    "onTimeBonus": { "fish": 1 },
+    "stepDone": { "fish": 3 },
+    "goalDone": { "fish": 20, "bond": 5 },
+    "dayClosure": { "bond": 1 },
+    "retroactiveMultiplier": 0.5
+  },
+  "caps": {
+    "fishPerLogicalDay": 15,
+    "socialMinutesEarnedPerDay": 30,
+    "minCommitmentMinutesToReward": 5
+  }
+}

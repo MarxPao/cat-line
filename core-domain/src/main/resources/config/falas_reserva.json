@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "byMood": {
+    "RADIANTE": [
+      "Miau, mamãe! Hoje estamos voando! Qual é o próximo desafio do nosso novelo?",
+      "Prrr! O fio do dia está super alinhado, que orgulho de você!"
+    ],
+    "FELIZ": [
+      "Miau! Estou aqui do seu lado, mamãe. Vamos ver o que vem a seguir?",
+      "Ronrom... você está indo muito bem hoje! Um passinho de cada vez."
+    ],
+    "TRANQUILA": [
+      "Miau, mamãe. Um passinho calmo já puxa o nosso fio.",
+      "Estou quietinha aqui no tapete esperando você marcar o próximo item."
+    ],
+    "SONOLENTA": [
+      "Miaaau... *bocejo*... se estiver cansada, que tal escolher só uma coisinha bem pequenininha?",
+      "Vamos devagarinho hoje, mamãe. Descansar também faz parte."
+    ],
+    "MANHOSA": [
+      "Miau, mamãe... vem cá me fazer um carinho? Sem cobrança, só o menor passinho quando você quiser.",
+      "Estou manhosinha aqui no seu colo. Qualquer coisinha que você fizer já me deixa feliz."
+    ]
+  }
+}

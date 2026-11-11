@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Cat Line — Agenda, Hábitos, Metas e Foco 8-Bit</title>
+  <meta name="theme-color" content="#181425">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Cat Line">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400..700&family=Silkscreen:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="phone-wrapper">
+    <div class="phone-frame">
+      <!-- Tela do App Cat Line -->
+      <div class="app-screen">
+          <!-- Banner de Instalação Rápida no Celular (WebAPK Oficial Google + APK Direto) -->
+          <div id="install-pwa-banner" class="install-banner-wrap" style="display: block;">
+            <div class="install-banner-content" style="flex-wrap: wrap; gap: 6px;">
+              <span class="install-banner-icon">🐾</span>
+              <div class="install-banner-text" style="flex: 1; min-width: 140px;">
+                <strong>Instalar App no Celular</strong>
+                <span>Instale sem erros direto na sua gaveta de apps!</span>
+              </div>
+              <button id="btn-pwa-install" class="pixel-btn btn-sm btn-green" style="font-weight:bold;">📲 Instalar (1 Toque)</button>
+              <a href="/CatLine-Instalador.apk" download="CatLine-Instalador.apk" class="pixel-btn btn-sm" style="background:#5A4E7C;color:#fff;text-decoration:none;padding:5px 8px;font-size:11px;border:2px solid #181425;">📦 Baixar APK v3.2.0</a>
+              <button id="btn-pwa-dismiss" class="install-banner-close" onclick="document.getElementById('install-pwa-banner').style.display='none'">✕</button>
+            </div>
+            <div id="ios-install-hint" class="ios-install-hint-box" style="display: none;">
+              No iPhone: toque no ícone <strong>Compartilhar ⎋</strong> e depois em <strong>"Adicionar à Tela de Início"</strong> 📲
+            </div>
+            <div id="android-install-hint" class="ios-install-hint-box" style="display: none; background:#262038; color:#FFF3B0; padding:8px; font-size:12px; border-top:2px solid #181425;">
+              💡 <strong>Dica infalível no Android:</strong> Toque nos <strong>3 pontinhos (⋮)</strong> no canto superior direito do Chrome e toque em <strong>"Instalar aplicativo"</strong> (ou <strong>"Adicionar à tela inicial"</strong>). O Google instala o Cat Line nativamente sem bloqueio de segurança!
+            </div>
+          </div>
+
+          <!-- Top Header com HUD de Moedas e Ações Rápidas -->
+          <header class="app-header">
+            <div class="app-title-row">
+              <div style="display:flex; align-items:center; gap:6px;">
+                <span class="app-name">Cat Line</span>
+                <span class="app-daykey" id="hud-daykey">Dia: 2026-10-25</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:5px;">
+                <button id="btn-theme-toggle" class="pixel-btn btn-sm btn-icon" onclick="window.app && window.app.toggleDarkMode()" title="Alternar Tema Claro/Noturno">🌙</button>
+                <button id="btn-font-toggle" class="pixel-btn btn-sm btn-icon" onclick="window.app && window.app.toggleLargeFont()" title="Alternar Tamanho da Fonte">A+</button>
+              </div>
+            </div>
+            <div class="hud-currencies">
+              <span class="hud-pill hud-fish" title="Peixinhos">🐟 <strong id="val-fish">100</strong></span>
+              <span class="hud-pill hud-golden" title="Novelos Dourados">🧶 <strong id="val-gold">2</strong></span>
+              <span class="hud-pill hud-bond" title="Vínculo acumulado">🐾 <strong id="val-bond">240</strong></span>
+            </div>
+          </header>
+
+          <!-- Conteúdo da Aba Ativa -->
+          <div class="app-content-scroll" id="app-content">
+            <!-- As telas (Hoje, Rotina, Metas, Gatinha, Mais) renderizam aqui -->
+          </div>
+
+          <!-- Botão Flutuante (+) de Criação Rápida (Bottom Sheet) -->
+          <button id="fab-quick-add" class="fab-add-btn" onclick="window.app && window.app.openQuickCreateSheet()" title="Criar Compromisso, Hábito, Meta ou Mimo">＋</button>
+
+          <!-- Bottom Sheet de Criação Rápida em 2 Toques -->
+          <div id="quick-create-backdrop" class="bottom-sheet-backdrop" style="display:none;" onclick="if(event.target===this) window.app.closeQuickCreateSheet()">
+            <div class="bottom-sheet-box" id="quick-create-box"></div>
+          </div>
+
+          <!-- Snackbar de Desfazer Exclusão -->
+          <div id="undo-snackbar" class="undo-snackbar" style="display:none;">
+            <span id="undo-snackbar-text">Item excluído</span>
+            <button class="pixel-btn btn-sm btn-gold" onclick="window.app && window.app.undoLastDelete()">↩ Desfazer</button>
+          </div>
+
+          <!-- Container de Confetes Pixel Art 8-Bit -->
+          <div id="pixel-confetti-layer" class="pixel-confetti-layer"></div>
+
+          <!-- Bottom Navigation Bar (5 Abas Principais Ergonômicas) -->
+          <nav class="bottom-nav" id="bottom-nav">
+            <!-- Abas ativas são renderizadas aqui via JS -->
+          </nav>
+        </div>
+      </div>
+    </main>
+
+  <script src="clock.js"></script>
+  <script src="commitments-config.js"></script>
+  <script src="goal-step-engine.js"></script>
+  <script src="commitment-state-machine.js"></script>
+  <script src="delay-metrics-engine.js"></script>
+  <script src="reward-ledger-engine.js"></script>
+  <script src="day-closure-engine.js"></script>
+  <script src="weekly-log-engine.js"></script>
+  <script src="backup-engine.js"></script>
+  <script src="app.js"></script>
+  <script>
+    // Registro do Service Worker para suporte PWA offline e WebAPK nativo do Google
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(err => {
+          console.warn('SW register error:', err);
+        });
+      });
+    }
+
+    // Gerenciador de Instalação no Celular
+    let deferredPrompt = null;
+    const banner = document.getElementById('install-pwa-banner');
+    const installBtn = document.getElementById('btn-pwa-install');
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone || window.location.protocol === 'file:';
+
+    if (isStandalone && banner) {
+      banner.style.display = 'none';
+    }
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      if (banner && !isStandalone) banner.style.display = 'block';
+    });
+
+    window.addEventListener('appinstalled', () => {
+      if (banner) banner.style.display = 'none';
+      deferredPrompt = null;
+    });
+
+    if (installBtn) {
+      installBtn.addEventListener('click', async () => {
+        if (deferredPrompt) {
+          deferredPrompt.prompt();
+          const { outcome } = await deferredPrompt.userChoice;
+          if (outcome === 'accepted' && banner) {
+            banner.style.display = 'none';
+          }
+          deferredPrompt = null;
+        } else if (isIOS) {
+          const hint = document.getElementById('ios-install-hint');
+          if (hint) hint.style.display = 'block';
+        } else {
+          const hint = document.getElementById('android-install-hint');
+          if (hint) hint.style.display = hint.style.display === 'none' ? 'block' : 'none';
+        }
+      });
+    }
+
+    if (isIOS && !isStandalone && banner) {
+      banner.style.display = 'block';
+      const hint = document.getElementById('ios-install-hint');
+      if (hint) hint.style.display = 'block';
+    }
+  </script>
+</body>
+</html>

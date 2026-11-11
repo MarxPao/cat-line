@@ -1,0 +1,40 @@
+# Gradle / Android
+.gradle/
+build/
+**/build/
+local.properties
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+bin/
+gen/
+out/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# IDE
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Keystore / Secrets
+*.jks
+*.keystore
+keystore.properties
+secrets.properties
+
+# Tools & Local Binaries
+cloudflared.exe
+tools-apk/
+build-apk/
+*.idsig
+*.zip
+node_modules/
+scripts/tunnel_url.txt

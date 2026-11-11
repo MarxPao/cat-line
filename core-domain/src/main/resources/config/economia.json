@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "taskBaseRewards": {
+    "P": 5,
+    "M": 10,
+    "G": 20
+  },
+  "maxPaidSmallTasksPerDay": 10,
+  "diminishingReturnsStartItemIndex": 12,
+  "diminishingReturnsMultiplier": 0.5,
+  "retroactiveCheckInMultiplier": 0.5,
+  "punctualityMultipliers": {
+    "ADIANTADO": 1.2,
+    "NO_PRAZO": 1.0,
+    "ATRASADO_LEVE": 0.6,
+    "ATRASADO_FORTE": 0.3,
+    "PERDIDO": 0.0
+  },
+  "habitBaseReward": 8,
+  "habitStreakStepBonus": 0.02,
+  "habitStreakMaxMultiplier": 1.5,
+  "maxOvercomingBonusFish": 15,
+  "overcomingReferenceMinutes": 15.0,
+  "dayCloseRewards": {
+    "NENHUM": 0,
+    "BRONZE": 10,
+    "PRATA": 20,
+    "OURO": 35
+  },
+  "dayCloseThresholds": {
+    "bronzeRatio": 0.5,
+    "silverRatio": 0.75,
+    "goldRatio": 1.0
+  },
+  "recoveryDayEveningMinItems": 2,
+  "screenTimeWithinGoalReward": 10,
+  "weeklyChest": {
+    "minFish": 40,
+    "maxFish": 120,
+    "pityGuaranteeEveryChests": 4
+  },
+  "goldenYarnMilestones": {
+    "shortGoal": 1,
+    "mediumGoal": 3,
+    "longGoal": 5,
+    "goldDaysInWeekThreshold": 5,
+    "goldWeekReward": 1
+  },
+  "storeReferencePrices": {
+    "simpleCosmeticMin": 40,
+    "simpleCosmeticMax": 80,
+    "mediumCosmeticOrFurnitureMin": 150,
+    "mediumCosmeticOrFurnitureMax": 300,
+    "largeSceneItemMin": 600,
+    "largeSceneItemMax": 1000,
+    "foodOrToyMin": 10,
+    "foodOrToyMax": 30,
+    "newAreaGoldenYarn": 8,
+    "newCatGoldenYarn": 15,
+    "reserveYarnGoldenYarn": 2,
+    "maxReserveYarnHeld": 2
+  },
+  "moodWeights": {
+    "punctualityWeight": 0.45,
+    "consistencyWeight": 0.35,
+    "focusWeight": 0.20,
+    "radiantThreshold": 85.0,
+    "happyThreshold": 70.0,
+    "calmThreshold": 50.0,
+    "sleepyThreshold": 30.0
+  }
+}

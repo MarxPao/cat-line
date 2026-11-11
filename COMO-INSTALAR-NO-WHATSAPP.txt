@@ -1,0 +1,29 @@
+🐾 BEM-VINDA AO CAT LINE! 🐾
+Seu aplicativo de rotina, hábitos, metas e foco em pixel art 8-bit com a gatinha calico e o novelo.
+
+==================================================
+📱 COMO INSTALAR NO SEU CELULAR EM 1 MINUTO
+==================================================
+
+OPÇÃO A · INSTALAR PELO LINK DIRETO (MAIS FÁCIL):
+1. Abra este link no navegador do seu celular:
+   👉 https://watson-declared-unfortunately-refrigerator.trycloudflare.com (ou http://192.168.100.38:5500 se estiver no mesmo Wi-Fi)
+2. No Android: Toque no botão verde "Instalar 📲" que aparece no topo da tela, ou toque nos 3 pontinhos e escolha "Instalar aplicativo" / "Adicionar à tela inicial".
+3. No iPhone: Toque no botão Compartilhar (quadradinho com a seta para cima) e selecione "Adicionar à Tela de Início".
+4. Pronto! O app fica salvo na tela inicial com o ícone da gatinha e funciona em tela cheia como um app nativo, mesmo sem internet!
+
+OPÇÃO B · ARQUIVO OFFLINE (CatLine-App.html):
+1. Abra o arquivo "CatLine-App.html" diretamente no seu celular ou computador.
+2. Ele abre direto no navegador sem precisar de internet ou servidor.
+3. No celular, toque nos 3 pontinhos (Android) ou Compartilhar (iPhone) e escolha "Adicionar à tela de início".
+
+==================================================
+✨ FUNCIONALIDADES INCLUÍDAS
+==================================================
+• Gatinha calico que caminha pelo quarto e brinca com o novelo na patinha
+• Novelo que vai se enrolando no tempo conforme o prazo das metas esgota
+• Cronômetro regressivo em dias (7d, 30d, 90d, 365d)
+• Briefing Mensal em 5 etapas para planejar ou editar sua rotina a cada mês
+• Bloqueio inteligente de redes sociais (com níveis de rigor de 0 a 4)
+• Gráficos de pontualidade e o Fio de Atraso
+• Sons chiptune 8-bit autênticos

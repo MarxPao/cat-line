@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Cat Line</string>
+    <string name="app_subtitle">Agenda, hábitos e metas com a sua gatinha e o novelo de lã</string>
+    <string name="modularity_section_title">Tudo é modulável (ligar / desligar módulos)</string>
+    <string name="modularity_always_active">Sempre ativo (núcleo)</string>
+</resources>

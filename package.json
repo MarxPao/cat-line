@@ -1,0 +1,23 @@
+{
+  "name": "cat-line",
+  "version": "3.2.0",
+  "description": "Cat Line — App gamificado de agenda, hábitos, metas e foco em pixel art 8-bit",
+  "main": "web-preview/server.js",
+  "scripts": {
+    "test": "node scripts/run-all-tests.js",
+    "build:single": "node scripts/build-single-file-html.js",
+    "build:apk": "node scripts/build-apk.js",
+    "start": "node web-preview/server.js"
+  },
+  "keywords": [
+    "catline",
+    "pixel-art",
+    "gamification",
+    "android",
+    "focus",
+    "habits"
+  ],
+  "author": "Antigravity",
+  "license": "UNLICENSED",
+  "private": true
+}
