@@ -1,343 +1,70 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Instalar Cat Line | App Oficial</title>
-  <meta name="description" content="Baixe e instale o Cat Line - Seu assistente pessoal com gatinha virtual, hábitos, rotinas e gamificação.">
-  <meta name="theme-color" content="#181528">
-  <link rel="icon" type="image/png" href="icon-192.png">
-  <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=Press+Start+2P&display=swap" rel="stylesheet">
-
-  <style>
-    :root {
-      --bg: #0f0d1b;
-      --card-bg: rgba(26, 23, 44, 0.85);
-      --card-border: rgba(167, 139, 250, 0.2);
-      --accent: #ff7ebb;
-      --accent-glow: rgba(255, 126, 187, 0.4);
-      --accent-secondary: #8b5cf6;
-      --text-main: #f8fafc;
-      --text-muted: #94a3b8;
-      --gold: #fbbf24;
-      --green: #34d399;
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      -webkit-tap-highlight-color: transparent;
-    }
-
-    body {
-      background-color: var(--bg);
-      background-image: 
-        radial-gradient(at 0% 0%, rgba(139, 92, 246, 0.2) 0px, transparent 50%),
-        radial-gradient(at 100% 100%, rgba(255, 126, 187, 0.2) 0px, transparent 50%);
-      color: var(--text-main);
-      font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 24px 16px;
-    }
-
-    .container {
-      width: 100%;
-      max-width: 480px;
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
-    }
-
-    .card {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 28px;
-      padding: 32px 24px;
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.6);
-      text-align: center;
-    }
-
-    .avatar-wrapper {
-      position: relative;
-      width: 110px;
-      height: 110px;
-      margin: 0 auto 18px;
-    }
-
-    .avatar {
-      width: 100%;
-      height: 100%;
-      border-radius: 28px;
-      object-fit: cover;
-      box-shadow: 0 10px 25px var(--accent-glow);
-      border: 2px solid rgba(255, 255, 255, 0.15);
-    }
-
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      background: rgba(52, 211, 153, 0.15);
-      border: 1px solid rgba(52, 211, 153, 0.3);
-      color: var(--green);
-      font-size: 0.8rem;
-      font-weight: 700;
-      padding: 4px 12px;
-      border-radius: 100px;
-      margin-bottom: 12px;
-    }
-
-    .badge-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--green);
-      box-shadow: 0 0 8px var(--green);
-    }
-
-    h1 {
-      font-family: 'Press Start 2P', monospace;
-      font-size: 1.35rem;
-      color: #fff;
-      letter-spacing: -0.5px;
-      margin-bottom: 8px;
-      text-shadow: 0 0 12px var(--accent-glow);
-    }
-
-    .tagline {
-      font-size: 0.95rem;
-      color: var(--text-muted);
-      line-height: 1.5;
-      margin-bottom: 24px;
-    }
-
-    .btn {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 12px;
-      width: 100%;
-      padding: 18px 24px;
-      border-radius: 18px;
-      font-size: 1.05rem;
-      font-weight: 800;
-      text-decoration: none;
-      transition: all 0.2s ease;
-      cursor: pointer;
-      border: none;
-    }
-
-    .btn-download {
-      background: linear-gradient(135deg, #ff7ebb, #8b5cf6);
-      color: #ffffff;
-      box-shadow: 0 10px 25px rgba(255, 126, 187, 0.4);
-      margin-bottom: 12px;
-    }
-
-    .btn-download:hover, .btn-download:active {
-      transform: translateY(-2px);
-      box-shadow: 0 14px 30px rgba(255, 126, 187, 0.55);
-    }
-
-    .btn-web {
-      background: rgba(255, 255, 255, 0.06);
-      color: var(--text-main);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-    }
-
-    .btn-web:hover, .btn-web:active {
-      background: rgba(255, 255, 255, 0.1);
-    }
-
-    .file-meta {
-      font-size: 0.78rem;
-      color: var(--text-muted);
-      margin-top: -6px;
-      margin-bottom: 20px;
-    }
-
-    .instructions {
-      text-align: left;
-      background: rgba(0, 0, 0, 0.25);
-      border-radius: 20px;
-      padding: 20px;
-      margin-top: 10px;
-      border: 1px solid rgba(255, 255, 255, 0.05);
-    }
-
-    .instructions h3 {
-      font-size: 0.9rem;
-      font-weight: 700;
-      color: var(--gold);
-      margin-bottom: 14px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .step-list {
-      list-style: none;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-
-    .step-item {
-      display: flex;
-      align-items: flex-start;
-      gap: 12px;
-      font-size: 0.88rem;
-      color: #e2e8f0;
-      line-height: 1.4;
-    }
-
-    .step-num {
-      background: rgba(139, 92, 246, 0.25);
-      color: #c4b5fd;
-      border: 1px solid rgba(139, 92, 246, 0.4);
-      min-width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 0.75rem;
-      font-weight: 800;
-      margin-top: 1px;
-    }
-
-    .features-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      margin-top: 8px;
-      text-align: left;
-    }
-
-    .feature-box {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid rgba(255, 255, 255, 0.06);
-      padding: 12px;
-      border-radius: 14px;
-    }
-
-    .feature-box strong {
-      display: block;
-      color: #fff;
-      font-size: 0.85rem;
-      margin-bottom: 2px;
-    }
-
-    .feature-box span {
-      font-size: 0.75rem;
-      color: var(--text-muted);
-    }
-
-    footer {
-      text-align: center;
-      font-size: 0.78rem;
-      color: var(--text-muted);
-      margin-top: 8px;
-    }
-
-    .highlight-badge {
-      background: rgba(251, 191, 36, 0.15);
-      color: var(--gold);
-      padding: 2px 6px;
-      border-radius: 6px;
-      font-weight: 600;
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cat Line — instalar | padaria_lab</title>
+<meta name="theme-color" content="#161512">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#161512;--fg:#f2efe4;--mut:#8f8b7c;--line:#2b2a25;--acc:#ee5a1c}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--fg);font-family:'JetBrains Mono','Courier New',monospace;min-height:100vh;display:flex;justify-content:center;padding:32px 20px}
+main{width:100%;max-width:460px;display:flex;flex-direction:column;gap:32px}
+.logo{font-size:1.5rem;font-weight:500;letter-spacing:-.5px}
+.logo b{color:var(--acc);font-weight:700}
+.hero{text-align:left;display:flex;flex-direction:column;gap:14px;margin-top:24px}
+.hero img{width:84px;height:84px;border-radius:20px;border:1px solid var(--line)}
+h1{font-size:2.2rem;font-weight:700;letter-spacing:-1px}
+h1 b{color:var(--acc)}
+.tag{color:var(--mut);font-size:.9rem;line-height:1.6}
+.btn{display:flex;justify-content:space-between;align-items:center;padding:18px 20px;border-radius:6px;text-decoration:none;font:inherit;font-weight:700;font-size:.95rem}
+.btn.p{background:var(--acc);color:var(--bg)}
+.btn.p:active{filter:brightness(.9)}
+.btn.s{border:1px solid var(--line);color:var(--fg);font-weight:500}
+.btn.s:active{background:var(--line)}
+.meta{color:var(--mut);font-size:.75rem;margin-top:-20px}
+h2{font-size:.75rem;color:var(--mut);font-weight:500;text-transform:lowercase;letter-spacing:1px;margin-bottom:14px}
+h2::before{content:"// ";color:var(--acc)}
+ol{list-style:none;counter-reset:s;border-top:1px solid var(--line)}
+li{counter-increment:s;padding:14px 0;border-bottom:1px solid var(--line);font-size:.85rem;line-height:1.5;display:flex;gap:14px}
+li::before{content:"0" counter(s);color:var(--acc);font-weight:700}
+li em{font-style:normal;color:var(--acc)}
+footer{color:var(--mut);font-size:.75rem;padding-bottom:12px}
+footer b{color:var(--fg);font-weight:500}
+footer i{color:var(--acc);font-style:normal}
+</style>
 </head>
 <body>
+<main>
+  <div class="logo">padaria<b>_</b>lab</div>
 
-  <div class="container">
-    <div class="card">
-      <div class="avatar-wrapper">
-        <img src="icon-512.png" alt="Cat Line Icon" class="avatar">
-      </div>
+  <section class="hero">
+    <img src="icon-512.png" alt="Cat Line">
+    <h1>cat<b>_</b>line</h1>
+    <p class="tag">hábitos, foco e rotina com a sua gatinha. funciona 100% offline, dados só no seu aparelho.</p>
+  </section>
 
-      <div class="badge">
-        <span class="badge-dot"></span> Versão v3.2.0 Oficial
-      </div>
+  <a class="btn p" href="https://github.com/MarxPao/cat-line/releases/download/v3.2.0/CatLine.apk"><span>baixar app android</span><span>.apk ↓</span></a>
+  <p class="meta">v3.2.0 · ~240 KB</p>
 
-      <h1>Cat Line</h1>
-      <p class="tagline">Sua gatinha virtual de hábitos, foco e rotinas diárias com pixel art e mimos.</p>
+  <a class="btn s" href="./app.html"><span>abrir versão web</span><span>→</span></a>
 
-      <!-- Botão Direto de Instalação do APK -->
-      <a href="https://github.com/MarxPao/cat-line/releases/download/v3.2.0/CatLine.apk" class="btn btn-download" id="apkDownloadBtn">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-          <polyline points="7 10 12 15 17 10"></polyline>
-          <line x1="12" y1="15" x2="12" y2="3"></line>
-        </svg>
-        Baixar Aplicativo Android (.apk)
-      </a>
-      <div class="file-meta">Tamanho: ~240 KB • Funciona 100% Offline</div>
+  <section>
+    <h2>como instalar</h2>
+    <ol>
+      <li>toque em <em>baixar app android</em>.</li>
+      <li>abra o arquivo <em>CatLine.apk</em> nas notificações.</li>
+      <li>se aparecer “fonte desconhecida”: <em>configurações → permitir desta fonte</em>.</li>
+      <li>pronto, o ícone fica na tela inicial.</li>
+    </ol>
+  </section>
 
-      <!-- Abrir direto no navegador / PWA -->
-      <a href="./app.html" class="btn btn-web">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="10"></circle>
-          <line x1="2" y1="12" x2="22" y2="12"></line>
-          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-        </svg>
-        Usar Versão Web no Navegador
-      </a>
-
-      <!-- Guia Rápido de Instalação no Celular -->
-      <div class="instructions">
-        <h3>📱 Como Instalar no Celular:</h3>
-        <ul class="step-list">
-          <li class="step-item">
-            <span class="step-num">1</span>
-            <span>Toque no botão rosa <strong>"Baixar Aplicativo"</strong> acima.</span>
-          </li>
-          <li class="step-item">
-            <span class="step-num">2</span>
-            <span>Ao concluir o download, abra o arquivo <strong>CatLine.apk</strong> na barra de notificações.</span>
-          </li>
-          <li class="step-item">
-            <span class="step-num">3</span>
-            <span>Se o Android alertar sobre fonte desconhecida, toque em <span class="highlight-badge">Configurações > Permitir desta fonte</span> (ou "Instalar assim mesmo").</span>
-          </li>
-          <li class="step-item">
-            <span class="step-num">4</span>
-            <span>Pronto! O ícone da gatinha aparecerá direto na sua tela inicial.</span>
-          </li>
-        </ul>
-      </div>
-
-      <!-- Destaques -->
-      <div class="features-grid">
-        <div class="feature-box">
-          <strong>🔒 100% Privado</strong>
-          <span>Sem nuvem: todos os dados ficam salvos no seu aparelho.</span>
-        </div>
-        <div class="feature-box">
-          <strong>⚡ Super Leve</strong>
-          <span>Abre instantaneamente e consome quase zero de bateria.</span>
-        </div>
-      </div>
-
-    </div>
-
-    <footer>
-      Desenvolvido com carinho para o universo <strong>Cat Line</strong>
-    </footer>
-  </div>
-
+  <footer>feito por <b>padaria<i>_</i>lab</b></footer>
+</main>
 </body>
 </html>
