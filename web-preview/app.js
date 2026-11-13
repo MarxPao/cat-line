@@ -8803,11 +8803,37 @@ class AppUI {
       if (isNaN(parts[0])) return;
       const d = Clock.newDate();
       d.setHours(parts[0], parts[1] || 0, 0, 0);
-      const triggerMs = d.getTime();
+      const goal = o.goalId ? (state.goals || []).find(g => g.id === o.goalId) : null;
+      this.scheduleNovelo(o.id, o.title, o.time, d.getTime(), (goal && goal.yarnColorId) || 'pink', nowMs, false);    });
 
-      if (triggerMs > nowMs) {
-        try { window.AndroidBlocker.scheduleReminder(o.id, o.title, o.time, triggerMs); } catch (e) {}
+    // Prazos das metas (novelo de cada meta com a cor dela)
+    (state.goals || []).forEach(g => {
+      const id = 'goal-' + g.id;
+      if (g.archived || (g.progress >= 1) || !(g.remainingSeconds > 0)) {
+        try { window.AndroidBlocker.cancelReminder(id); } catch (e) {}
+        return;
       }
+      const deadline = nowMs + g.remainingSeconds * 1000;
+      const dd = new Date(deadline);
+      const hhmm = String(dd.getHours()).padStart(2, '0') + ':' + String(dd.getMinutes()).padStart(2, '0');
+      this.scheduleNovelo(id, g.title, hhmm, deadline, g.yarnColorId || g.yarnColor || 'pink', nowMs, true);
+    });
+  }
+
+  // Agenda os avisos escalonados do novelo: 1 dia antes (so metas), 1h antes, na hora e ao vencer.
+  scheduleNovelo(id, title, hhmm, atMs, color, nowMs, withDayBefore) {
+    const nb = window.AndroidBlocker;
+    if (!nb) return;
+    const H = 3600000;
+    const plan = [];
+    if (withDayBefore) plan.push(['PRE_DAY', atMs - 24 * H]);
+    plan.push(['PRE_HOUR', atMs - H], ['NOW', atMs], ['OVERDUE', atMs + (withDayBefore ? H : 15 * 60000)]);
+    plan.forEach(([kind, t]) => {
+      if (t <= nowMs) return;
+      try {
+        if (typeof nb.scheduleDeadline === 'function') nb.scheduleDeadline(id, title, hhmm, t, kind, color);
+        else if (kind === 'NOW') nb.scheduleReminder(id, title, hhmm, t);
+      } catch (e) {}
     });
   }
 

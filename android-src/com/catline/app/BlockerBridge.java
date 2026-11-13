@@ -161,6 +161,12 @@ public class BlockerBridge {
         NotificationHelper.scheduleReminder(ctx, id, title, timeStr, triggerAtMillis);
     }
 
+    /** kind: PRE_DAY | PRE_HOUR | NOW | OVERDUE; colorId: pink, gold, blue, green, purple, orange, red */
+    @JavascriptInterface
+    public void scheduleDeadline(String id, String title, String timeStr, long triggerAtMillis, String kind, String colorId) {
+        NotificationHelper.scheduleDeadline(ctx, id, title, timeStr, triggerAtMillis, kind, colorId);
+    }
+
     @JavascriptInterface
     public void cancelReminder(String id) {
         NotificationHelper.cancelReminder(ctx, id);

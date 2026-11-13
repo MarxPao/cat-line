@@ -6,9 +6,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.util.Log;
 
-/**
- * Receptor de transmissões de alarme e cliques de ação nas notificações nativas do Cat Line.
- */
+/** Recebe alarmes de aviso, cliques em "Feito" e o boot do aparelho. */
 public class ReminderReceiver extends BroadcastReceiver {
     private static final String TAG = "CatLineReminderRcvr";
 
@@ -18,32 +16,33 @@ public class ReminderReceiver extends BroadcastReceiver {
         String action = intent.getAction();
 
         if (NotificationHelper.ACTION_TRIGGER_REMINDER.equals(action)) {
-            String id = intent.getStringExtra(NotificationHelper.EXTRA_TASK_ID);
-            String title = intent.getStringExtra(NotificationHelper.EXTRA_TASK_TITLE);
-            String timeStr = intent.getStringExtra(NotificationHelper.EXTRA_TASK_TIME);
-
-            Log.d(TAG, "Disparando lembrete nativo: " + title);
-            NotificationHelper.showReminderNotification(context, id, title, timeStr);
+            NotificationHelper.showNotification(context,
+                    intent.getStringExtra(NotificationHelper.EXTRA_TASK_ID),
+                    intent.getStringExtra(NotificationHelper.EXTRA_TASK_TITLE),
+                    intent.getStringExtra(NotificationHelper.EXTRA_TASK_TIME),
+                    intent.getStringExtra(NotificationHelper.EXTRA_KIND),
+                    intent.getStringExtra(NotificationHelper.EXTRA_COLOR));
 
         } else if (NotificationHelper.ACTION_COMPLETE_TASK.equals(action)) {
             String id = intent.getStringExtra(NotificationHelper.EXTRA_TASK_ID);
             String title = intent.getStringExtra(NotificationHelper.EXTRA_TASK_TITLE);
-
-            Log.d(TAG, "Ação 'Feito ✓' acionada diretamente na notificação para: " + id);
-
-            // Cancela a notificação ativa
+            String color = intent.getStringExtra(NotificationHelper.EXTRA_COLOR);
             if (id != null) {
                 NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
                 if (nm != null) {
-                    nm.cancel(Math.abs(id.hashCode()));
+                    for (String k : new String[]{NotificationHelper.KIND_PRE_DAY, NotificationHelper.KIND_PRE_HOUR,
+                            NotificationHelper.KIND_NOW, NotificationHelper.KIND_OVERDUE}) {
+                        nm.cancel(Math.abs((id + "|" + k).hashCode() % 900000));
+                    }
                 }
+                NotificationHelper.cancelReminder(context, id);  // cancela avisos futuros dessa tarefa
             }
-
-            // Registra a tarefa como concluída para consumo pela WebView
             NotificationHelper.recordTaskCompletedLocally(context, id, title);
+            NotificationHelper.showDoneCelebration(context, id, title, color);
 
         } else if (Intent.ACTION_BOOT_COMPLETED.equals(action)) {
-            Log.d(TAG, "Dispositivo reiniciado. Cat Line pronto para reagendar compromissos.");
+            Log.d(TAG, "Reboot: reagendando avisos");
+            NotificationHelper.rescheduleAll(context);
         }
     }
 }

@@ -188,6 +188,11 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
 
+        if (android.os.Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(\"android.permission.POST_NOTIFICATIONS\") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{\"android.permission.POST_NOTIFICATIONS\"}, 7001);
+        }
+
         webView = new WebView(this);
         webView.setBackgroundColor(Color.parseColor("#181425"));
         WebSettings settings = webView.getSettings();
