@@ -1479,7 +1479,12 @@ function saveStateToDeviceStorage() {
       largeFont: state.largeFont,
       notificationsEnabled: state.notificationsEnabled
     };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+    const serialized = JSON.stringify(toSave);
+    localStorage.setItem(STORAGE_KEY, serialized);
+    // Espelhamento redundante no cofre nativo do Android (evita perda entre atualizacoes de APK)
+    if (window.AndroidBlocker && typeof window.AndroidBlocker.putSecret === 'function') {
+      try { window.AndroidBlocker.putSecret('catline_backup_state', serialized); } catch (e) {}
+    }
   } catch (err) {
     console.warn('Cat Line: aviso ao salvar na memória do celular:', err);
   }
@@ -1487,7 +1492,18 @@ function saveStateToDeviceStorage() {
 
 function loadStateFromDeviceStorage() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    let raw = localStorage.getItem(STORAGE_KEY);
+    // Se o localStorage da WebView vier vazio (ex: atualizacao ou limpeza de cache), restaura do cofre nativo
+    if (!raw && window.AndroidBlocker && typeof window.AndroidBlocker.getSecret === 'function') {
+      try {
+        const vaultState = window.AndroidBlocker.getSecret('catline_backup_state');
+        if (vaultState && vaultState.length > 10) {
+          raw = vaultState;
+          localStorage.setItem(STORAGE_KEY, vaultState);
+          console.log('Cat Line: dados restaurados do cofre nativo do Android!');
+        }
+      } catch (e) {}
+    }
     if (!raw) return;
     let data = JSON.parse(raw);
 
@@ -1610,6 +1626,9 @@ function loadStateFromDeviceStorage() {
 function clearDeviceStorageAndReset() {
   if (confirm("Deseja apagar os dados salvos na memória deste celular e reiniciar o Cat Line do zero?")) {
     localStorage.removeItem(STORAGE_KEY);
+    if (window.AndroidBlocker && typeof window.AndroidBlocker.removeSecret === 'function') {
+      try { window.AndroidBlocker.removeSecret('catline_backup_state'); } catch (e) {}
+    }
     window.location.reload();
   }
 }
