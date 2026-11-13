@@ -39,11 +39,11 @@ def png(path, w, h, px):
 def tail_points(state):
     """Pontos (x,y) do fio saindo do novelo."""
     pts = []
-    if state == 'frouxo':      # fio longo e solto, ondulando
-        for i in range(0, 20):
-            x = 24 + i * 0.4
-            y = 22 + i * 0.45 + math.sin(i * 0.7) * 2
-            pts.append((int(x), int(y)))
+    if state == 'frouxo':      # fio longo e solto dentro da borda
+        for i in range(0, 16):
+            x = 24 + i * 0.38
+            y = 22 + i * 0.45 + math.sin(i * 0.8) * 1.4
+            pts.append((min(30, int(x)), min(30, int(y))))
     elif state == 'enrolando':  # fio curto e firme
         for i in range(0, 7):
             pts.append((25 + i, 23 + int(i * 0.8)))

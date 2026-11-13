@@ -2445,6 +2445,7 @@ class AppUI {
     syncNativeBlocker();
     this.checkNativeCompletedTasks();
     this.syncNativeReminders();
+    this.checkAppUpdate();
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) {
         this.checkNativeCompletedTasks();
@@ -2687,6 +2688,15 @@ class AppUI {
     const woundPct = Math.round(getWoundFractionByTime(selectedGoal) * 100);
 
     this.contentEl.innerHTML = `
+      ${state.availableUpdate ? `
+        <div class="pixel-card cream" style="border-left: 5px solid #27ae60; margin-bottom: 10px; padding: 10px 12px; display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+          <span style="font-size: 13px;">🆕 Versão <strong>v${state.availableUpdate.version}</strong> disponível!</span>
+          <div style="display: flex; gap: 6px;">
+            <a href="${state.availableUpdate.url}" target="_blank" class="pixel-btn btn-sm btn-green" style="text-decoration:none;">Atualizar</a>
+            <button class="pixel-btn btn-sm btn-secondary" onclick="window.app.dismissUpdateBanner()">✕</button>
+          </div>
+        </div>
+      ` : ''}
       <!-- Balão de Fala com a Gatinha -->
       <div class="speech-bubble-container">
         <div class="speech-bubble-box" id="speech-bubble-text">${state.cat.speechText}</div>
@@ -2810,7 +2820,10 @@ class AppUI {
               <h4 style="margin-bottom: 2px;">⏳ Linha do Tempo de Hoje · ${state.occurrences.filter(o => o.state === 'FEITO').length + state.habits.filter(h => h.completed).length} de ${state.occurrences.length + state.habits.length} feitos</h4>
               <span style="font-size: 12px; color: ${PALETTE.grayDark};">Compromissos e Hábitos ordenados por horário</span>
             </div>
-            <button class="pixel-btn btn-sm btn-green" style="flex-shrink: 0;" onclick="window.app.openQuickCreateSheet('occurrence')">＋ Criar</button>
+            <div style="display: flex; gap: 6px; flex-shrink: 0;">
+              <button class="pixel-btn btn-sm btn-gold" onclick="window.app.openQuickCreateSheet('once')" title="Atividade que só vai fazer 1 ou 2 vezes">⚡ Avulsa</button>
+              <button class="pixel-btn btn-sm btn-green" onclick="window.app.openQuickCreateSheet('occurrence')">＋ Criar</button>
+            </div>
           </div>
         </div>
 
@@ -3906,7 +3919,34 @@ class AppUI {
   markDone(id) {
     this.checkInLive(id);
     const occ = state.occurrences.find(o => o.id === id);
-    if (occ) occ.state = 'FEITO';
+    if (occ) {
+      occ.state = 'FEITO';
+      const maxRuns = occ.maxRuns || (occ.recurrence === 'Pontual · 2 vezes' ? 2 : (occ.recurrence === 'Pontual · 1 vez' ? 1 : 0));
+      if (maxRuns > 0) {
+        occ.maxRuns = maxRuns;
+        occ.completedRuns = (occ.completedRuns || 0) + 1;
+        if (occ.completedRuns >= maxRuns) {
+          occ.completedAllRuns = true;
+          this.setCatSpeech(`Prontinho! "${occ.title}" (${occ.completedRuns}/${maxRuns}) finalizada de vez!`);
+        } else {
+          this.setCatSpeech(`Boa! "${occ.title}" ${occ.completedRuns}/${maxRuns} feita — falta só mais 1 vez!`);
+        }
+        this.persist();
+        this.renderActiveTab();
+      }
+    }
+  }
+
+  reopenSecondRun(id) {
+    const occ = state.occurrences.find(o => o.id === id);
+    if (!occ) return;
+    occ.state = 'pending';
+    occ.completedAllRuns = false;
+    audio.playBlip();
+    this.setCatSpeech(`Bora para a ${Math.min((occ.completedRuns || 1) + 1, occ.maxRuns || 2)}ª vez de "${occ.title}"!`);
+    this.persist();
+    this.renderActiveTab();
+    this.syncNativeReminders();
   }
 
   retroCheckIn(id) {
@@ -4549,6 +4589,71 @@ class AppUI {
     this.renderActiveTab();
   }
 
+  dismissUpdateBanner() {
+    state.availableUpdate = null;
+    this.renderActiveTab();
+  }
+
+  selectAgendaDay(dayStr) {
+    state.agendaSelectedDay = dayStr;
+    audio.playBlip();
+    this.renderActiveTab();
+  }
+
+  hasTimeConflict(occ) {
+    const st = String(occ.state || 'pending').toLowerCase();
+    if (st === 'done' || st === 'feito') return false;
+    const toMin = (hhmm) => {
+      const [h, m] = String(hhmm || '00:00').split(':').map(Number);
+      return (isNaN(h) ? 0 : h) * 60 + (isNaN(m) ? 0 : m);
+    };
+    const startA = toMin(occ.time);
+    const endA = startA + (occ.estimatedDuration || occ.plannedMinutes || 30);
+    const dayA = occ.date || state.dayKey;
+    return (state.occurrences || []).some(other => {
+      if (other.id === occ.id) return false;
+      const ost = String(other.state || 'pending').toLowerCase();
+      if (ost === 'done' || ost === 'feito') return false;
+      const dayB = other.date || state.dayKey;
+      if (dayA !== dayB) return false;
+      const startB = toMin(other.time);
+      const endB = startB + (other.estimatedDuration || other.plannedMinutes || 30);
+      return startA < endB && startB < endA;
+    });
+  }
+
+  renderAgendaWeekStrip(selectedDay) {
+    const base = Clock.newDate(state.dayKey + 'T12:00:00');
+    const dow = (base.getDay() + 6) % 7; // Seg=0 .. Dom=6
+    const monday = Clock.newDate(base.getTime() - dow * 86400000);
+    const labels = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+    const cells = [];
+    for (let i = 0; i < 7; i++) {
+      const d = Clock.newDate(monday.getTime() + i * 86400000);
+      const iso = d.toISOString().slice(0, 10);
+      const dayOccs = (state.occurrences || []).filter(o => (o.date || state.dayKey) === iso || (!o.date && iso === state.dayKey));
+      const mins = dayOccs.reduce((acc, o) => acc + (o.estimatedDuration || o.plannedMinutes || 30), 0);
+      const isSel = iso === selectedDay;
+      const isToday = iso === state.dayKey;
+      cells.push(`
+        <button onclick="window.app.selectAgendaDay('${iso}')" style="flex:1; min-width:42px; padding:6px 4px; border-radius:8px; border:2px solid ${isSel ? PALETTE.cozyPurple : '#d5d8dc'}; background:${isSel ? '#f3ecff' : '#fff'}; cursor:pointer; text-align:center;">
+          <div style="font-size:11px; font-weight:700; color:${isToday ? '#e67e22' : PALETTE.grayDark};">${labels[i]}</div>
+          <div style="font-size:13px; font-weight:800; color:${PALETTE.ink};">${iso.slice(8, 10)}</div>
+          <div style="font-size:10px; color:${PALETTE.cozyPurple};">${dayOccs.length} · ${mins}m</div>
+        </button>
+      `);
+    }
+    return `
+      <div class="pixel-card cream" style="margin-bottom: 10px; padding: 10px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <strong style="font-size:13px;">🗓️ Visão da Semana</strong>
+          <span style="font-size:11px; color:${PALETTE.grayDark};">Toque no dia para ver ou agendar</span>
+        </div>
+        <div style="display:flex; gap:4px; overflow-x:auto;">${cells.join('')}</div>
+      </div>
+    `;
+  }
+
   saveEditOccurrence(id) {
     const occ = state.occurrences.find(o => o.id === id);
     if (!occ) return;
@@ -4565,7 +4670,12 @@ class AppUI {
     }
     const durEl = document.getElementById(`edit-occ-duration-${id}`);
     if (durEl && durEl.value) occ.estimatedDuration = parseInt(durEl.value, 10);
-    if (recurrenceEl) occ.recurrence = recurrenceEl.value;
+    if (recurrenceEl) {
+      occ.recurrence = recurrenceEl.value;
+      occ.maxRuns = occ.recurrence === 'Pontual · 2 vezes' ? 2 : (occ.recurrence === 'Pontual · 1 vez' ? 1 : 0);
+    }
+    const notesEl = document.getElementById(`edit-occ-notes-${id}`);
+    if (notesEl) occ.notes = notesEl.value.trim();
     if (dateEl && dateEl.value) occ.date = dateEl.value;
     state.editingOccurrenceId = null;
     audio.playMeowGreeting();
@@ -4588,7 +4698,8 @@ class AppUI {
   }
 
   renderTabAgenda() {
-    const workload = replanEngine.calculateDailyWorkload(state.occurrences, state.dayKey);
+    const selDay = state.agendaSelectedDay || state.dayKey;
+    const workload = replanEngine.calculateDailyWorkload(state.occurrences, selDay);
     const capacity = replanEngine.getDailyCapacity(state.briefing);
     const isOver = workload.totalMinutes > capacity;
     const pct = Math.min(100, Math.round((workload.totalMinutes / capacity) * 100));
@@ -4598,6 +4709,7 @@ class AppUI {
     const initialDuration = pre && pre.estMinutes ? pre.estMinutes : 30;
 
     this.contentEl.innerHTML = `
+      ${this.renderAgendaWeekStrip(selDay)}
       <div class="pixel-card">
         <h4>📅 Agenda · Novo Compromisso</h4>
         <p style="font-size: 14px; color: ${PALETTE.grayDark}; margin-bottom: 10px;">Defina título, horário, esforço, duração estimada e frequência recorrente:</p>
@@ -4637,10 +4749,13 @@ class AppUI {
               <option value="3x por semana">✨ Recorrente · 3x por semana</option>
               <option value="Semanal">📆 Recorrente · Semanal uma vez por semana</option>
               <option value="Apenas hoje">📌 Pontual · Apenas hoje</option>
+              <option value="Pontual · 1 vez">⚡ Pontual · Só 1 vez</option>
+              <option value="Pontual · 2 vezes">⚡ Pontual · Só 2 vezes</option>
               <option value="Data específica">📅 Pontual · Data específica</option>
             </select>
-            <input type="date" id="new-task-date" class="pixel-input" value="${state.dayKey}" style="flex: 1; min-width: 120px;" title="Data do compromisso">
+            <input type="date" id="new-task-date" class="pixel-input" value="${selDay}" style="flex: 1; min-width: 120px;" title="Data do compromisso">
           </div>
+          <input type="text" id="new-task-notes" class="pixel-input" placeholder="📝 Notas / checklist rápido (opcional)">
           <button class="pixel-btn btn-green" onclick="window.app.addCommitment()">Enrolar na Agenda</button>
         </div>
       </div>
@@ -4766,12 +4881,15 @@ class AppUI {
     const estimatedDuration = durationEl ? parseInt(durationEl.value, 10) : (effort === 'G' ? 60 : (effort === 'M' ? 30 : 15));
     const recurrence = recurrenceEl ? recurrenceEl.value : 'Todos os dias';
     const date = dateEl && dateEl.value ? dateEl.value : state.dayKey;
+    const notesEl = document.getElementById('new-task-notes');
+    const notes = notesEl ? notesEl.value.trim() : '';
     if (!title) return;
 
     const reward = effort === 'G' ? 20 : (effort === 'M' ? 10 : 5);
     const pre = state.scheduledStepPreFill;
     const goalId = pre ? pre.goalId : null;
     const stepId = pre ? pre.stepId : null;
+    const maxRuns = recurrence === 'Pontual · 2 vezes' ? 2 : (recurrence === 'Pontual · 1 vez' ? 1 : 0);
 
     state.occurrences.push({
       id: `occ-${Clock.now()}`,
@@ -4787,6 +4905,9 @@ class AppUI {
       reward,
       estimatedDuration,
       recurrence,
+      maxRuns,
+      completedRuns: 0,
+      notes,
       date,
       state: 'pending',
       delayMin: 0
@@ -8121,7 +8242,18 @@ class AppUI {
           unmarked: 'Sem marcação'
         };
         const stLabel = stateLabels[normSt] || 'Pendente';
-        stateBadge = `<span class="state-pill state-pill-${normSt}">${stLabel}</span>`;
+        const maxRuns = o.maxRuns || (o.recurrence === 'Pontual · 2 vezes' ? 2 : (o.recurrence === 'Pontual · 1 vez' ? 1 : 0));
+        const runBadge = maxRuns > 0
+          ? ` <span class="state-pill" style="background:#fef3c7;color:#92400e;">⚡ ${o.completedRuns || 0}/${maxRuns}</span>`
+          : '';
+        const conflictBadge = this.hasTimeConflict(o)
+          ? ` <span class="state-pill" style="background:#fee2e2;color:#b91c1c;">⚠️ Conflito</span>`
+          : '';
+        const secondRunBtn = (maxRuns === 2 && (o.completedRuns || 0) === 1 && item.done)
+          ? ` <button class="pixel-btn btn-sm btn-gold" onclick="event.stopPropagation(); window.app.reopenSecondRun('${o.id}')">Fazer 2ª vez</button>`
+          : '';
+        const noteLine = o.notes ? `<div style="font-size:12px;color:${PALETTE.grayDark};margin-top:2px;">📝 ${o.notes}</div>` : '';
+        stateBadge = `<span class="state-pill state-pill-${normSt}">${stLabel}</span>${runBadge}${conflictBadge}${secondRunBtn}${noteLine}`;
 
         if (normSt === 'done') {
           const chk = (state.checkIns || []).filter(c => c.commitmentId === o.id).slice(-1)[0];
@@ -8436,13 +8568,14 @@ class AppUI {
     const t = state.quickCreateType || 'occurrence';
 
     let formHtml = '';
-    if (t === 'occurrence') {
+    if (t === 'occurrence' || t === 'once') {
       const selG = (state.goals || []).find(g => g.id === state.quickCreateSelectedGoalId);
       const availableSteps = selG && selG.steps ? selG.steps.filter(s => !s.archived && !s.doneAt) : [];
+      const isOnce = t === 'once';
 
       formHtml = `
         <div style="display: flex; flex-direction: column; gap: 10px;">
-          <input type="text" id="qc-occ-title" class="pixel-input" placeholder="O que vamos fazer hoje?" autofocus>
+          <input type="text" id="qc-occ-title" class="pixel-input" placeholder="${isOnce ? 'Atividade avulsa (ex: ir ao banco, pagar boleto)' : 'O que vamos fazer hoje?'}" autofocus>
           <div class="flex-row">
             <div style="flex: 1;">
               <label style="font-size: 12px; font-weight: 700;">⏰ Horário:</label>
@@ -8459,13 +8592,22 @@ class AppUI {
           </div>
           <div class="flex-row">
             <select id="qc-occ-recurrence" class="pixel-input" style="flex: 1;">
-              <option value="Todos os dias" selected>🔄 Todos os dias</option>
-              <option value="Dias úteis">💼 Dias úteis</option>
-              <option value="Finais de semana">🏖️ Finais de semana</option>
-              <option value="3x por semana">✨ 3x por semana</option>
-              <option value="Apenas hoje">📌 Apenas hoje</option>
+              ${isOnce ? `
+                <option value="Pontual · 1 vez" selected>⚡ Pontual · Só 1 vez</option>
+                <option value="Pontual · 2 vezes">⚡ Pontual · Só 2 vezes</option>
+                <option value="Apenas hoje">📌 Apenas hoje</option>
+              ` : `
+                <option value="Todos os dias" selected>🔄 Todos os dias</option>
+                <option value="Dias úteis">💼 Dias úteis</option>
+                <option value="Finais de semana">🏖️ Finais de semana</option>
+                <option value="3x por semana">✨ 3x por semana</option>
+                <option value="Apenas hoje">📌 Apenas hoje</option>
+                <option value="Pontual · 1 vez">⚡ Pontual · Só 1 vez</option>
+                <option value="Pontual · 2 vezes">⚡ Pontual · Só 2 vezes</option>
+              `}
             </select>
           </div>
+          <input type="text" id="qc-occ-notes" class="pixel-input" placeholder="📝 Nota rápida (opcional)">
           <div class="flex-row">
             <div style="flex: 1;">
               <label style="font-size: 12px; font-weight: 700;">🎯 Meta opcional:</label>
@@ -8562,6 +8704,7 @@ class AppUI {
       </div>
       <div class="subnav-pills-bar" style="margin-bottom: 12px;">
         <button class="subnav-pill-btn ${t === 'occurrence' ? 'active' : ''}" onclick="window.app.setQuickCreateType('occurrence')">📅 Compromisso</button>
+        <button class="subnav-pill-btn ${t === 'once' ? 'active' : ''}" onclick="window.app.setQuickCreateType('once')">⚡ Avulsa 1x/2x</button>
         <button class="subnav-pill-btn ${t === 'habit' ? 'active' : ''}" onclick="window.app.setQuickCreateType('habit')">🔄 Hábito</button>
         <button class="subnav-pill-btn ${t === 'goal' ? 'active' : ''}" onclick="window.app.setQuickCreateType('goal')">🎯 Meta</button>
         <button class="subnav-pill-btn ${t === 'reward' ? 'active' : ''}" onclick="window.app.setQuickCreateType('reward')">🎁 Mimo</button>
@@ -8572,16 +8715,18 @@ class AppUI {
 
   submitQuickCreate() {
     const t = state.quickCreateType || 'occurrence';
-    if (t === 'occurrence') {
+    if (t === 'occurrence' || t === 'once') {
       const title = (document.getElementById('qc-occ-title')?.value || '').trim();
       if (!title) return alert('Digite o título do compromisso!');
       const time = document.getElementById('qc-occ-time')?.value || '19:00';
       const effort = document.getElementById('qc-occ-effort')?.value || 'M';
-      const recurrence = document.getElementById('qc-occ-recurrence')?.value || 'Todos os dias';
+      const recurrence = document.getElementById('qc-occ-recurrence')?.value || (t === 'once' ? 'Pontual · 1 vez' : 'Todos os dias');
+      const notes = (document.getElementById('qc-occ-notes')?.value || '').trim();
       const goalId = document.getElementById('qc-occ-goal')?.value || null;
       const stepId = document.getElementById('qc-occ-step')?.value || null;
       const reward = effort === 'G' ? 20 : (effort === 'M' ? 10 : 5);
       const estMin = effort === 'G' ? 60 : (effort === 'M' ? 30 : 15);
+      const maxRuns = recurrence === 'Pontual · 2 vezes' ? 2 : (recurrence === 'Pontual · 1 vez' ? 1 : 0);
       state.occurrences.push({
         id: `occ-${Clock.now()}`,
         title,
@@ -8589,6 +8734,9 @@ class AppUI {
         effort,
         reward,
         recurrence,
+        maxRuns,
+        completedRuns: 0,
+        notes,
         date: state.dayKey,
         plannedStart: `${state.dayKey}T${time}:00`,
         plannedZone: 'America/Sao_Paulo',
@@ -8814,7 +8962,8 @@ class AppUI {
     const nowMs = Clock.now();
 
     state.occurrences.forEach(o => {
-      if (o.state !== 'PENDENTE') {
+      const st = String(o.state || 'pending').toLowerCase();
+      if (st !== 'pendente' && st !== 'pending') {
         try { window.AndroidBlocker.cancelReminder(o.id); } catch (e) {}
         return;
       }
@@ -8833,7 +8982,7 @@ class AppUI {
         return;
       }
       const deadline = nowMs + g.remainingSeconds * 1000;
-      const dd = new Date(deadline);
+      const dd = Clock.newDate(deadline);
       const hhmm = String(dd.getHours()).padStart(2, '0') + ':' + String(dd.getMinutes()).padStart(2, '0');
       this.scheduleNovelo(id, g.title, hhmm, deadline, g.yarnColorId || g.yarnColor || 'pink', nowMs, true);
     });
@@ -8854,6 +9003,21 @@ class AppUI {
         else if (kind === 'NOW') nb.scheduleReminder(id, title, hhmm, t);
       } catch (e) {}
     });
+  }
+
+  async checkAppUpdate() {
+    const APP_VERSION = '3.2.0';
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    try {
+      const res = await fetch('https://api.github.com/repos/MarxPao/cat-line/releases/latest', { cache: 'no-store' });
+      if (!res.ok) return;
+      const rel = await res.json();
+      const latest = String(rel.tag_name || '').replace(/^v/i, '').trim();
+      if (latest && latest !== APP_VERSION && latest.localeCompare(APP_VERSION, undefined, { numeric: true }) > 0) {
+        state.availableUpdate = { version: latest, url: 'https://marxpao.github.io/cat-line/' };
+        if (state.activeTab === 'hoje') this.renderActiveTab();
+      }
+    } catch (e) {}
   }
 
   checkNativeCompletedTasks() {

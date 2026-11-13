@@ -158,6 +158,7 @@ const manifest = `<?xml version="1.0" encoding="utf-8"?>
             <intent-filter>
                 <action android:name="com.catline.app.ACTION_TRIGGER_REMINDER" />
                 <action android:name="com.catline.app.ACTION_COMPLETE_TASK" />
+                <action android:name="com.catline.app.ACTION_SNOOZE_TASK" />
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>

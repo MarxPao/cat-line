@@ -29,12 +29,14 @@ public final class NotificationHelper {
     public static final String CHANNEL_ID = "catline_reminders_channel";
     public static final String ACTION_TRIGGER_REMINDER = "com.catline.app.ACTION_TRIGGER_REMINDER";
     public static final String ACTION_COMPLETE_TASK = "com.catline.app.ACTION_COMPLETE_TASK";
+    public static final String ACTION_SNOOZE_TASK = "com.catline.app.ACTION_SNOOZE_TASK";
 
     public static final String EXTRA_TASK_ID = "task_id";
     public static final String EXTRA_TASK_TITLE = "task_title";
     public static final String EXTRA_TASK_TIME = "task_time";
     public static final String EXTRA_KIND = "kind";
     public static final String EXTRA_COLOR = "yarn_color";
+    public static final String EXTRA_SNOOZE_MIN = "snooze_min";
 
     public static final String KIND_PRE_DAY = "PRE_DAY";
     public static final String KIND_PRE_HOUR = "PRE_HOUR";
@@ -188,6 +190,9 @@ public final class NotificationHelper {
             doneIntent.putExtra(EXTRA_COLOR, colorId);
             PendingIntent donePi = PendingIntent.getBroadcast(ctx, notifId + 10000, doneIntent, piFlags());
 
+            PendingIntent snooze15Pi = buildSnoozePi(ctx, notifId + 20000, taskId, title, colorId, 15);
+            PendingIntent snooze60Pi = buildSnoozePi(ctx, notifId + 30000, taskId, title, colorId, 60);
+
             Notification.Builder b = newBuilder(ctx);
             b.setSmallIcon(smallIcon(ctx))
              .setContentTitle(head)
@@ -197,7 +202,9 @@ public final class NotificationHelper {
              .setAutoCancel(true)
              .setPriority(Notification.PRIORITY_HIGH)
              .setDefaults(Notification.DEFAULT_ALL)
-             .addAction(0, "Feito", donePi);
+             .addAction(0, "Feito", donePi)
+             .addAction(0, "Adiar 15m", snooze15Pi)
+             .addAction(0, "Adiar 1h", snooze60Pi);
             Bitmap large = noveloBitmap(ctx, state, colorId);
             if (large != null) b.setLargeIcon(large);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -250,6 +257,16 @@ public final class NotificationHelper {
         } catch (Throwable t) {
             return null;
         }
+    }
+
+    private static PendingIntent buildSnoozePi(Context ctx, int req, String id, String title, String color, int mins) {
+        Intent i = new Intent(ctx, ReminderReceiver.class);
+        i.setAction(ACTION_SNOOZE_TASK);
+        i.putExtra(EXTRA_TASK_ID, id);
+        i.putExtra(EXTRA_TASK_TITLE, title);
+        i.putExtra(EXTRA_COLOR, color);
+        i.putExtra(EXTRA_SNOOZE_MIN, mins);
+        return PendingIntent.getBroadcast(ctx, req, i, piFlags());
     }
 
     private static Intent buildTriggerIntent(Context ctx, String id, String title, String time, String kind, String color) {
