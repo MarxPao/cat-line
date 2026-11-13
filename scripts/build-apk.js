@@ -4,18 +4,21 @@ const { execSync } = require('child_process');
 
 console.log("=== COMPILANDO APK NATIVO OFICIAL DO CAT LINE (API 33 + PYTHON ZIP_STORED DEX + ZIPALIGN + APKSIGNER V1/V2/V3) ===");
 
+const isWin = process.platform === 'win32';
+const exe = (n) => isWin ? `${n}.exe` : n;
 const JAVA_HOME = process.env.JAVA_HOME || 'C:\\Program Files\\Microsoft\\jdk-17.0.20.101-hotspot';
-const JAVAC = `"${path.join(JAVA_HOME, 'bin', 'javac.exe')}"`;
-const JAVA = `"${path.join(JAVA_HOME, 'bin', 'java.exe')}"`;
-const KEYTOOL = `"${path.join(JAVA_HOME, 'bin', 'keytool.exe')}"`;
+const JAVAC = `"${path.join(JAVA_HOME, 'bin', exe('javac'))}"`;
+const JAVA = `"${path.join(JAVA_HOME, 'bin', exe('java'))}"`;
+const KEYTOOL = `"${path.join(JAVA_HOME, 'bin', exe('keytool'))}"`;
 
-const BT_DIR = path.resolve('tools-apk', 'build-tools', 'android-13');
-const AAPT = `"${path.join(BT_DIR, 'aapt.exe')}"`;
-const AAPT2 = `"${path.join(BT_DIR, 'aapt2.exe')}"`;
-const ZIPALIGN = `"${path.join(BT_DIR, 'zipalign.exe')}"`;
+const BT_DIR = process.env.ANDROID_BUILD_TOOLS || path.resolve('tools-apk', 'build-tools', 'android-13');
+const AAPT = `"${path.join(BT_DIR, exe('aapt'))}"`;
+const AAPT2 = `"${path.join(BT_DIR, exe('aapt2'))}"`;
+const ZIPALIGN = `"${path.join(BT_DIR, exe('zipalign'))}"`;
 const D8_JAR = `"${path.join(BT_DIR, 'lib', 'd8.jar')}"`;
 const APKSIGNER_JAR = `"${path.join(BT_DIR, 'lib', 'apksigner.jar')}"`;
-const ANDROID_JAR = `"${path.resolve('tools-apk', 'android-33.jar')}"`;
+const ANDROID_JAR = `"${process.env.ANDROID_JAR || path.resolve('tools-apk', 'android-33.jar')}"`;
+const PYTHON = isWin ? 'python' : 'python3';
 
 const BUILD_DIR = path.resolve('build-apk');
 const ASSETS_DIR = path.join(BUILD_DIR, 'assets');
@@ -44,7 +47,7 @@ function normalizeTimestamp(filePath) {
 
 // 1. Gera ícones multi-densidade (mdpi, hdpi, xhdpi, xxhdpi, xxxhdpi) + ícones PWA 192/512
 console.log("1. Gerando ícones multi-densidade oficiais e strings.xml...");
-execSync(`python scripts/apk_helper.py icons "${RES_DIR}" "${path.resolve('web-preview')}"`, { stdio: 'inherit' });
+execSync(`${PYTHON} scripts/apk_helper.py icons "${RES_DIR}" "${path.resolve('web-preview')}"`, { stdio: 'inherit' });
 
 const stringsXml = `<?xml version="1.0" encoding="utf-8"?>
 <resources>
@@ -75,8 +78,8 @@ console.log("3. Configurando AndroidManifest.xml (com.catline.app, minSdk=21, ta
 const manifest = `<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.catline.app"
-    android:versionCode="13"
-    android:versionName="3.2.0"
+    android:versionCode="14"
+    android:versionName="3.3.0"
     android:installLocation="auto">
 
     <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="33" />
@@ -273,7 +276,7 @@ normalizeTimestamp(dexFile);
 console.log("9. Empacotando classes.dex (ZIP_STORED descomprimido) com estrutura ZIP limpa...");
 const unalignedApk = path.join(BUILD_DIR, 'unaligned.apk');
 if (fs.existsSync(unalignedApk)) fs.unlinkSync(unalignedApk);
-execSync(`python scripts/apk_helper.py inject-dex "${baseApk}" "${dexFile}" "${unalignedApk}"`, { stdio: 'inherit' });
+execSync(`${PYTHON} scripts/apk_helper.py inject-dex "${baseApk}" "${dexFile}" "${unalignedApk}"`, { stdio: 'inherit' });
 
 // 10. ZIPALIGN de 4 bytes e alinhamento de página
 console.log("10. Executando zipalign (-p -f -v 4)...");

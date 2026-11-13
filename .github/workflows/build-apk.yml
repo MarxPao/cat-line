@@ -1,0 +1,46 @@
+name: Build & Release CatLine APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run JS tests
+        run: npm test
+
+      - name: Build CatLine.apk
+        env:
+          ANDROID_BUILD_TOOLS: ${{ env.ANDROID_HOME }}/build-tools/33.0.2
+          ANDROID_JAR: ${{ env.ANDROID_HOME }}/platforms/android-33/android.jar
+        run: |
+          if [ ! -d "$ANDROID_BUILD_TOOLS" ]; then
+            export ANDROID_BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/33.* | tail -n1)
+          fi
+          node scripts/build-apk.js
+
+      - name: Publish Release v3.3.0
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v3.3.0
+          name: Cat Line v3.3.0 - Novelo nas Notificações & Avulsas
+          files: |
+            CatLine.apk
+            CatLine-Instalador.apk
