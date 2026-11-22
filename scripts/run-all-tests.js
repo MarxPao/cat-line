@@ -25,7 +25,9 @@ const testScripts = [
   'test-phase17-weekly-log.js',
   'test-phase18-module-switches.js',
   'test-phase19-backup-schema-v2.js',
-  'test-phase20-final-regression.js'
+  'test-phase20-final-regression.js',
+  'test-phase21-xss.js',
+  'test-phase22-mood.js'
 ];
 
 console.log('🐾 [Cat Line] Executando suíte completa de testes automatizados...\n');

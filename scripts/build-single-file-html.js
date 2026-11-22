@@ -13,6 +13,7 @@ const rewardLedgerEnginePath = path.join(webDir, 'reward-ledger-engine.js');
 const dayClosureEnginePath = path.join(webDir, 'day-closure-engine.js');
 const weeklyLogEnginePath = path.join(webDir, 'weekly-log-engine.js');
 const backupEnginePath = path.join(webDir, 'backup-engine.js');
+const moodEnginePath = path.join(webDir, 'mood-checkin-engine.js');
 const jsPath = path.join(webDir, 'app.js');
 const imgPath = path.join(webDir, 'gatinha_referencia.jpg');
 const iconPath = path.join(webDir, 'icon-192.png');
@@ -28,6 +29,7 @@ const rewardLedgerEngineJs = fs.readFileSync(rewardLedgerEnginePath, 'utf8');
 const dayClosureEngineJs = fs.readFileSync(dayClosureEnginePath, 'utf8');
 const weeklyLogEngineJs = fs.readFileSync(weeklyLogEnginePath, 'utf8');
 const backupEngineJs = fs.readFileSync(backupEnginePath, 'utf8');
+const moodEngineJs = fs.readFileSync(moodEnginePath, 'utf8');
 const js = fs.readFileSync(jsPath, 'utf8');
 const imgBase64 = fs.readFileSync(imgPath).toString('base64');
 const imgDataUri = `data:image/jpeg;base64,${imgBase64}`;
@@ -54,6 +56,7 @@ html = html.replace('<script src="reward-ledger-engine.js"></script>', `<script>
 html = html.replace('<script src="day-closure-engine.js"></script>', `<script>\n${dayClosureEngineJs}\n</script>`);
 html = html.replace('<script src="weekly-log-engine.js"></script>', `<script>\n${weeklyLogEngineJs}\n</script>`);
 html = html.replace('<script src="backup-engine.js"></script>', `<script>\n${backupEngineJs}\n</script>`);
+html = html.replace('<script src="mood-checkin-engine.js"></script>', `<script>\n${moodEngineJs}\n</script>`);
 html = html.replace('<script src="app.js"></script>', `<script>\n${js}\n</script>`);
 
 const outPath = path.join(__dirname, '..', 'CatLine-App.html');

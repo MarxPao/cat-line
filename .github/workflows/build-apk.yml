@@ -1,5 +1,12 @@
 name: Build & Release CatLine APK
 
+# Segredos necessarios para publicar uma release (Settings > Secrets and variables > Actions):
+#   CATLINE_KEYSTORE_BASE64  conteudo do keystore de release em base64
+#   CATLINE_KEYSTORE_PASS    senha do keystore
+#   CATLINE_KEY_ALIAS        (opcional) alias da chave, padrao "catline"
+#   CATLINE_KEY_PASS         (opcional) senha da chave, padrao igual a do keystore
+# Sem esses segredos o APK e compilado com chave de desenvolvimento e NAO e publicado.
+
 on:
   push:
     branches: [ main ]
@@ -26,21 +33,56 @@ jobs:
       - name: Run JS tests
         run: npm test
 
+      - name: Gerar HTML único do app
+        run: node scripts/build-single-file-html.js
+
+      - name: Preparar keystore de release
+        id: signing
+        env:
+          KEYSTORE_B64: ${{ secrets.CATLINE_KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.CATLINE_KEYSTORE_PASS }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASS" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/catline-release.keystore"
+            echo "CATLINE_KEYSTORE=$RUNNER_TEMP/catline-release.keystore" >> "$GITHUB_ENV"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Segredos de assinatura ausentes. O APK sera compilado com chave de desenvolvimento e nao sera publicado."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build CatLine.apk
         env:
           ANDROID_BUILD_TOOLS: ${{ env.ANDROID_HOME }}/build-tools/33.0.2
           ANDROID_JAR: ${{ env.ANDROID_HOME }}/platforms/android-33/android.jar
+          CATLINE_KEYSTORE_PASS: ${{ secrets.CATLINE_KEYSTORE_PASS }}
+          CATLINE_KEY_ALIAS: ${{ secrets.CATLINE_KEY_ALIAS }}
+          CATLINE_KEY_PASS: ${{ secrets.CATLINE_KEY_PASS }}
         run: |
           if [ ! -d "$ANDROID_BUILD_TOOLS" ]; then
             export ANDROID_BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/33.* | tail -n1)
           fi
           node scripts/build-apk.js
 
-      - name: Publish Release v3.3.0
+      - name: Ler versao do APK
+        id: version
+        run: |
+          V=$(grep -o 'android:versionName="[^"]*"' scripts/build-apk.js | head -n1 | cut -d'"' -f2)
+          echo "name=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Guardar APK como artefato do workflow
+        if: steps.signing.outputs.release != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: CatLine-dev-apk
+          path: CatLine.apk
+
+      - name: Publish Release
+        if: steps.signing.outputs.release == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v3.3.0
-          name: Cat Line v3.3.0 - Novelo nas Notificações & Avulsas
+          tag_name: v${{ steps.version.outputs.name }}
+          name: Cat Line v${{ steps.version.outputs.name }}
           files: |
             CatLine.apk
             CatLine-Instalador.apk

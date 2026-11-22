@@ -23,6 +23,33 @@
   const SCHEMA_VERSION = 2;
   const APP_VERSION = '3.2.0';
 
+  const ID_KEY = /^(?:id|[A-Za-z]+Id)$/;
+  const UNSAFE_ID_CHARS = /[<>"'`\\$&\s\u0000-\u001f]/;
+
+  /**
+   * Procura recursivamente por campos de identificador com caracteres perigosos.
+   * Retorna o caminho do primeiro encontrado ou null.
+   */
+  function findUnsafeId(node, pathName, depth) {
+    if (depth > 12 || node === null || typeof node !== 'object') return null;
+    if (Array.isArray(node)) {
+      for (let i = 0; i < node.length; i++) {
+        const found = findUnsafeId(node[i], pathName + '[' + i + ']', depth + 1);
+        if (found) return found;
+      }
+      return null;
+    }
+    for (const key of Object.keys(node)) {
+      const value = node[key];
+      if (ID_KEY.test(key) && typeof value === 'string' && (value.length > 200 || UNSAFE_ID_CHARS.test(value))) {
+        return pathName + '.' + key;
+      }
+      const found = findUnsafeId(value, pathName + '.' + key, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+
   class BackupEngine {
     constructor(options = {}) {
       this.clock = options.clock || (typeof Clock !== 'undefined' ? Clock : null);
@@ -131,6 +158,7 @@
         rewardEvents,
         dayClosures,
         weeklyLogs,
+        moodLog: Array.isArray(state.moodLog) ? state.moodLog : [],
         habits: state.habits || [],
         briefing: state.briefing || {},
         blockRules: state.blockRules || [],
@@ -192,6 +220,13 @@
           }
         }
         data.schemaVersion = SCHEMA_VERSION;
+      }
+
+      // Identificadores sao usados em atributos HTML (onclick/id). Um backup adulterado
+      // nao pode trazer ids com aspas, tags ou espacos.
+      const unsafeIdPath = findUnsafeId(data, 'backup', 0);
+      if (unsafeIdPath) {
+        return { valid: false, error: 'Backup com identificador inválido em ' + unsafeIdPath };
       }
 
       const goals = Array.isArray(data.goals) ? data.goals : [];
@@ -370,6 +405,19 @@
           merged.realLifeRewards.push(JSON.parse(JSON.stringify(inMimo)));
         }
       });
+
+      // 9b. Humor do dia (um registro por dia; vence o mais recente)
+      const moodByDay = new Map();
+      (Array.isArray(merged.moodLog) ? merged.moodLog : [])
+        .concat(Array.isArray(backupData.moodLog) ? backupData.moodLog : [])
+        .forEach(e => {
+          if (!e || typeof e.dayKey !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(e.dayKey) || !Number.isInteger(e.level) || e.level < 1 || e.level > 5) return;
+          const prev = moodByDay.get(e.dayKey);
+          if (!prev || String(e.at || '') > String(prev.at || '')) {
+            moodByDay.set(e.dayKey, { dayKey: e.dayKey, level: e.level, at: typeof e.at === 'string' ? e.at : null });
+          }
+        });
+      merged.moodLog = Array.from(moodByDay.values()).sort((a, b) => (a.dayKey < b.dayKey ? -1 : 1));
 
       // 10. Atualiza schemaVersion
       merged.schemaVersion = SCHEMA_VERSION;

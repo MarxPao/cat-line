@@ -2,6 +2,26 @@
 
 Todas as alterações notáveis do projeto Cat Line são documentadas neste arquivo.
 
+## [3.3.0] — 2026-11-22
+
+### ✨ Novidades (já no código desde 13/11)
+- Novelo nas notificações (4 estados × 7 cores), avisos escalonados de prazo e reagendamento no boot.
+- Atividades avulsas 1x/2x, visão semanal, aviso de conflito de horário e soneca na notificação.
+- Espelhamento automático de dados com restauração segura via cofre nativo Android.
+
+### 💜 Humor do dia
+- Check-in de humor na aba Hoje, com 5 níveis e resposta da gatinha. Um registro por dia, interruptor próprio e incluído no backup.
+- Depois de 7 dias de registro, o app compara os dias leves com os dias bons em linguagem de coincidência, sem julgamento.
+
+### 🔒 Segurança
+- O workflow agora regenera o `CatLine-App.html` antes de compilar o APK, para o APK nunca sair com uma versão defasada do app.
+- Assinatura do APK agora usa keystore informado por variáveis de ambiente (`CATLINE_KEYSTORE`, `CATLINE_KEYSTORE_PASS`); a senha fixa foi removida do código. Sem as variáveis, o build usa uma chave local de desenvolvimento e avisa que não deve ser publicado.
+- Workflow de release só publica quando os segredos de assinatura existem e usa a versão do `versionName` como tag.
+- Todo texto digitado pela usuária passa por `escHtml` antes de entrar em `innerHTML`.
+- Importação de backup rejeita identificadores com aspas, tags ou espaços.
+- WebView sem acesso a arquivos arbitrários nem a content providers; CSP básica (`object-src`, `frame-src`, `base-uri`, `form-action`).
+- Nova suíte `test-phase21-xss.js`.
+
 ## [3.2.0] — 2026-11-11
 
 ### ✨ Novidades e Melhorias
