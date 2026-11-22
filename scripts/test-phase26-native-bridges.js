@@ -158,12 +158,38 @@ function slice(startMarker, endMarker) {
   assert.ok(read('android-src/com/catline/app/ReminderReceiver.java').includes('CatLineWidgetProvider.markDoneAndRefresh'));
   console.log('✓ 12. Layout, ids, descrição e atualização ao concluir pela notificação estão ligados');
 
-  // 6. O bloqueador não foi tocado
+  // 6. Diagnóstico de avisos (AndroidNotify)
+  const notifyJava = read('android-src/com/catline/app/NotifyBridge.java');
+  const notifyMethods = interfaceMethods(notifyJava);
+  const usedNotify = new Set([...app.matchAll(/AndroidNotify\.(\w+)/g)].map(m => m[1]));
+  // syncNativeReminders guarda a ponte em uma variável local chamada notify
+  [...app.matchAll(/\bnotify\.(\w+)\(/g)].forEach(m => usedNotify.add(m[1]));
+  assert.ok(usedNotify.size >= 6, 'o app deveria usar vários métodos de AndroidNotify');
+  assert.ok(usedNotify.has('cancelAllReminders'), 'o app deveria cancelar todos os alarmes pela ponte');
+  usedNotify.forEach(m => assert.ok(notifyMethods.includes(m), 'NotifyBridge.java não expõe ' + m));
+  assert.ok(build.includes('addJavascriptInterface(new NotifyBridge(this), "AndroidNotify")'));
+  ['sdk', 'notifications', 'channelBlocked', 'exactAlarm', 'batteryUnrestricted', 'manufacturer'].forEach(k => {
+    assert.ok(notifyJava.includes('o.put("' + k + '"'), 'status() não devolve ' + k);
+    assert.ok(app.includes('st.' + k) || k === 'sdk', 'o app não usa status.' + k);
+  });
+  console.log('✓ 13. AndroidNotify: métodos usados pelo app existem e status() devolve o que o cartão lê: ' + [...usedNotify].join(', '));
+
+  // 7. Alarmes confiáveis no Android
+  const helper = read('android-src/com/catline/app/NotificationHelper.java');
+  assert.ok(/intent\.setData\(Uri\.parse\("catline:\/\/reminder\//.test(helper), 'cada alarme precisa de dados únicos no Intent');
+  assert.ok(helper.includes('cancelAllScheduled'));
+  assert.ok(read('android-src/com/catline/app/ReminderReceiver.java').includes('ACTION_MY_PACKAGE_REPLACED'));
+  assert.ok(build.includes('android.intent.action.MY_PACKAGE_REPLACED'));
+  assert.ok(build.includes('android.permission.USE_EXACT_ALARM'));
+  assert.ok(/SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32"/.test(build));
+  console.log('✓ 14. Alarmes com Intent único, reagendados após atualizar o app, e alarme exato liberado no Android 13 ou mais novo');
+
+  // 8. O bloqueador não foi tocado
   ['BlockerBridge.java', 'BlockerService.java', 'BlockActivity.java', 'BlockPolicy.java', 'BlockerStore.java'].forEach(f => {
     const src = read('android-src/com/catline/app/' + f);
-    assert.ok(!/FileBridge|WidgetBridge|CatLineWidgetProvider/.test(src), f + ' não deveria depender das pontes novas');
+    assert.ok(!/FileBridge|WidgetBridge|NotifyBridge|CatLineWidgetProvider/.test(src), f + ' não deveria depender das pontes novas');
   });
-  console.log('✓ 13. Arquivos do bloqueador não dependem das pontes novas');
+  console.log('✓ 15. Arquivos do bloqueador não dependem das pontes novas');
 
   console.log('\n=== TODOS OS TESTES DAS PONTES NATIVAS PASSARAM ===');
 })().catch(err => { console.error(err); process.exit(1); });

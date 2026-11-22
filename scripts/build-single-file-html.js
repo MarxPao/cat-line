@@ -16,6 +16,7 @@ const backupEnginePath = path.join(webDir, 'backup-engine.js');
 const moodEnginePath = path.join(webDir, 'mood-checkin-engine.js');
 const stepTemplatesPath = path.join(webDir, 'step-templates.js');
 const icsImportPath = path.join(webDir, 'ics-import-engine.js');
+const reminderPlannerPath = path.join(webDir, 'reminder-planner.js');
 const jsPath = path.join(webDir, 'app.js');
 const imgPath = path.join(webDir, 'gatinha_referencia.jpg');
 const iconPath = path.join(webDir, 'icon-192.png');
@@ -34,6 +35,7 @@ const backupEngineJs = fs.readFileSync(backupEnginePath, 'utf8');
 const moodEngineJs = fs.readFileSync(moodEnginePath, 'utf8');
 const stepTemplatesJs = fs.readFileSync(stepTemplatesPath, 'utf8');
 const icsImportJs = fs.readFileSync(icsImportPath, 'utf8');
+const reminderPlannerJs = fs.readFileSync(reminderPlannerPath, 'utf8');
 const js = fs.readFileSync(jsPath, 'utf8');
 const imgBase64 = fs.readFileSync(imgPath).toString('base64');
 const imgDataUri = `data:image/jpeg;base64,${imgBase64}`;
@@ -63,6 +65,7 @@ html = html.replace('<script src="backup-engine.js"></script>', () => `<script>\
 html = html.replace('<script src="mood-checkin-engine.js"></script>', () => `<script>\n${moodEngineJs}\n</script>`);
 html = html.replace('<script src="step-templates.js"></script>', () => `<script>\n${stepTemplatesJs}\n</script>`);
 html = html.replace('<script src="ics-import-engine.js"></script>', () => `<script>\n${icsImportJs}\n</script>`);
+html = html.replace('<script src="reminder-planner.js"></script>', () => `<script>\n${reminderPlannerJs}\n</script>`);
 html = html.replace('<script src="app.js"></script>', () => `<script>\n${js}\n</script>`);
 
 const outPath = path.join(__dirname, '..', 'CatLine-App.html');

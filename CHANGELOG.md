@@ -22,6 +22,14 @@ Todas as alterações notáveis do projeto Cat Line são documentadas neste arqu
 - Widget "Hoje" na tela inicial com os próximos 3 compromissos e botão "Feito", pelo mesmo caminho das notificações.
 - Compilado e assinado com o SDK 33 sem erros. Ainda não testado num aparelho.
 
+### 🔔 Avisos que chegam
+- Cada compromisso agora avisa na sua própria data. Antes, o app agendava tudo para o dia de hoje e só quando era aberto, então compromissos de outros dias, inclusive os importados de `.ics`, não avisavam no dia certo, e os de hoje só avisavam se o app fosse aberto naquele dia.
+- Os avisos são reagendados a cada salvamento, em até 7 dias, sem esperar o app voltar para a tela, e só o que mudou é reenviado ao Android.
+- No APK, os avisos ligam sozinhos na primeira abertura. Antes dependiam de um botão escondido na aba Mais, e o botão conferia a API de notificação da web, que não existe no WebView.
+- Cartão de diagnóstico na aba Mais: confere permissão de notificação, alarme exato e economia de bateria, abre a tela certa do Android e tem "Aviso de teste agora" e "Testar em 1 minuto".
+- Alarmes com Intent único por compromisso e estágio, para dois avisos nunca se sobrescreverem. Reagendamento depois de atualizar o app. Alarme exato liberado no Android 13 ou mais novo pela permissão `USE_EXACT_ALARM`.
+- Desligar os avisos ou ativar o modo descanso cancela todos os alarmes pendentes.
+
 ### 🐛 Correções
 - Adicionar passo a uma meta pelo formulário salvava sempre o título "Novo Passo" sem estimativa.
 - Marcar um passo como feito, e mover um passo para cima ou para baixo, falhavam porque o app chamava métodos que o motor de metas não tem.

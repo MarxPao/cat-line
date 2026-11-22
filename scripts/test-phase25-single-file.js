@@ -38,7 +38,7 @@ console.log('✓ 2. ' + blocks.length + ' blocos de script compilam');
 const webDir = path.join(root, 'web-preview');
 ['clock.js', 'commitments-config.js', 'goal-step-engine.js', 'commitment-state-machine.js', 'delay-metrics-engine.js',
  'reward-ledger-engine.js', 'day-closure-engine.js', 'weekly-log-engine.js', 'backup-engine.js', 'mood-checkin-engine.js',
- 'step-templates.js', 'ics-import-engine.js', 'app.js'].forEach(file => {
+ 'step-templates.js', 'ics-import-engine.js', 'reminder-planner.js', 'app.js'].forEach(file => {
   const src = fs.readFileSync(path.join(webDir, file), 'utf8');
   assert.ok(html.includes(src), file + ' não entrou idêntico no HTML único');
 });

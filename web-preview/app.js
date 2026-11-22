@@ -1500,9 +1500,21 @@ function syncWidgetSnapshot() {
   } catch (e) {}
 }
 
+// Reagenda os avisos nativos depois de salvar, sem esperar o app voltar para a tela.
+let _reminderSyncTimer = null;
+function scheduleReminderSync() {
+  if (typeof window === 'undefined' || !window.AndroidBlocker || !window.app) return;
+  if (_reminderSyncTimer) clearTimeout(_reminderSyncTimer);
+  _reminderSyncTimer = setTimeout(() => {
+    _reminderSyncTimer = null;
+    try { window.app.syncNativeReminders(); } catch (e) {}
+  }, 800);
+}
+
 function saveStateToDeviceStorage() {
   syncNativeBlocker();
   syncWidgetSnapshot();
+  scheduleReminderSync();
   try {
     const toSave = {
       schemaVersion: 2,
@@ -2516,6 +2528,7 @@ class AppUI {
     this.startReminderCheckerLoop();
     syncNativeBlocker();
     this.checkNativeCompletedTasks();
+    this.autoEnableNativeNotifications();
     this.syncNativeReminders();
     this.checkAppUpdate();
     document.addEventListener('visibilitychange', () => {
@@ -8791,6 +8804,7 @@ class AppUI {
               ${state.notificationsEnabled ? '🔔 Ativo ✓' : 'Ativar Avisos 🔔'}
             </button>
           </div>
+          ${this.renderNotifDiagnosticsHtml()}
           <div class="flex-row" style="margin-top: 8px; gap: 6px; flex-wrap: wrap;">
             <button class="pixel-btn btn-sm ${state.darkMode ? 'btn-gold' : 'btn-secondary'}" onclick="window.app.toggleDarkMode()">
               ${state.darkMode ? '☀️ Tema Claro' : '🌙 Modo Noturno'}
@@ -9190,8 +9204,107 @@ class AppUI {
     this.persist();
   }
 
+  // Diagnóstico dos avisos no Android: mostra o que impede um aviso de chegar e leva à tela certa.
+  getNotifStatus() {
+    try {
+      if (window.AndroidNotify && typeof window.AndroidNotify.status === 'function') {
+        return JSON.parse(window.AndroidNotify.status());
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  renderNotifDiagnosticsHtml() {
+    const st = this.getNotifStatus();
+    if (!st) return '';
+    const notifOk = st.notifications && !st.channelBlocked;
+    const rows = [
+      { ok: notifOk, label: 'Permissão para avisar', fix: 'window.app.notifFixNotifications()', btn: 'Permitir',
+        hint: notifOk ? '' : 'Sem essa permissão o Android esconde todos os avisos da gatinha.' },
+      { ok: st.exactAlarm, label: 'Horário exato', fix: 'window.app.notifFixExact()', btn: 'Permitir',
+        hint: st.exactAlarm ? '' : 'Sem ela os avisos podem atrasar vários minutos.' },
+      { ok: st.batteryUnrestricted, label: 'Sem economia de bateria', fix: 'window.app.notifFixBattery()', btn: 'Liberar',
+        hint: st.batteryUnrestricted ? '' : this.batteryHint(st.manufacturer) }
+    ];
+    const rowsHtml = rows.map(r => `
+      <div style="display: flex; align-items: center; gap: 8px; padding: 4px 0;">
+        <span style="font-size: 16px;">${r.ok ? '✅' : '⚠️'}</span>
+        <div style="flex: 1; min-width: 0;">
+          <div style="font-size: 13px; font-weight: 700;">${r.label}</div>
+          ${r.hint ? `<div style="font-size: 12px; color: ${PALETTE.grayDark}; line-height: 1.3;">${escHtml(r.hint)}</div>` : ''}
+        </div>
+        ${r.ok ? '' : `<button class="pixel-btn btn-sm btn-purple" style="min-height: 40px;" onclick="${r.fix}">${r.btn}</button>`}
+      </div>`).join('');
+    const allOk = rows.every(r => r.ok);
+    return `
+      <div style="margin-top: 8px; padding: 8px 10px; background: #fff; border: 2px dashed ${PALETTE.cozyPurple};">
+        <div style="font-size: 13px; font-weight: 700; margin-bottom: 2px;">${allOk ? '🐾 Tudo certo para os avisos chegarem' : '🐾 Falta ajustar para os avisos chegarem'}</div>
+        ${rowsHtml}
+        <div class="flex-row" style="gap: 6px; flex-wrap: wrap; margin-top: 6px;">
+          <button class="pixel-btn btn-sm btn-green" style="min-height: 40px;" onclick="window.app.notifTestNow()">Aviso de teste agora</button>
+          <button class="pixel-btn btn-sm btn-secondary" style="min-height: 40px;" onclick="window.app.notifTestIn1Min()">Testar em 1 minuto</button>
+        </div>
+      </div>`;
+  }
+
+  batteryHint(manufacturer) {
+    const m = String(manufacturer || '');
+    if (/xiaomi|redmi|poco/.test(m)) return 'Xiaomi: procure Início automático e deixe a bateria do Cat Line sem restrições.';
+    if (/samsung/.test(m)) return 'Samsung: em Bateria, procure Limites de uso em segundo plano e tire o Cat Line da lista de apps em suspensão.';
+    if (/oppo|realme|oneplus/.test(m)) return 'Permita o início automático e a atividade em segundo plano do Cat Line.';
+    if (/huawei|honor/.test(m)) return 'Em Início de aplicativos, gerencie manualmente e permita a atividade em segundo plano.';
+    if (/vivo|iqoo/.test(m)) return 'Permita o início automático e a atividade em segundo plano do Cat Line.';
+    return 'Se os avisos atrasarem ou sumirem, tire o Cat Line da economia de bateria.';
+  }
+
+  notifFixNotifications() { try { window.AndroidNotify.requestNotificationPermission(); } catch (e) {} }
+  notifFixExact() { try { window.AndroidNotify.openExactAlarmSettings(); } catch (e) {} }
+  notifFixBattery() { try { window.AndroidNotify.openBatterySettings(); } catch (e) {} }
+
+  notifTestNow() {
+    try { window.AndroidNotify.sendTestNow(); } catch (e) {}
+    this.setCatSpeech('Mandei um aviso agora. Se ele não apareceu, confira a permissão acima.');
+  }
+
+  notifTestIn1Min() {
+    try {
+      window.AndroidBlocker.scheduleDeadline('teste-agendado', 'Teste agendado da gatinha', 'agora', Clock.now() + 60000, 'NOW', 'pink');
+      this.setCatSpeech('Agendei um teste para daqui a 1 minuto. Pode bloquear a tela e esperar.');
+    } catch (e) {
+      this.setCatSpeech('Não consegui agendar o teste neste aparelho.');
+    }
+  }
+
+  // No APK, liga os avisos uma única vez: antes eles só funcionavam depois de achar o botão escondido na aba Mais.
+  autoEnableNativeNotifications() {
+    if (!window.AndroidNotify) return;
+    let done = false;
+    try { done = localStorage.getItem('CATLINE_NOTIF_AUTO_V1') === '1'; } catch (e) {}
+    if (done) return;
+    try { localStorage.setItem('CATLINE_NOTIF_AUTO_V1', '1'); } catch (e) {}
+    if (!state.notificationsEnabled) {
+      state.notificationsEnabled = true;
+      this.persist();
+    }
+  }
+
   // Lembretes Reais no Horário dos Compromissos
   async requestRealReminders() {
+    // No APK os avisos são do Android. O botão confere a permissão em vez de depender da API de notificação da web.
+    if (window.AndroidNotify) {
+      state.notificationsEnabled = !state.notificationsEnabled;
+      if (state.notificationsEnabled) {
+        const st = this.getNotifStatus();
+        if (st && (!st.notifications || st.channelBlocked)) this.notifFixNotifications();
+        this.setCatSpeech('Avisos ligados! Confira abaixo se o Android deixa eles chegarem.');
+      } else {
+        this.setCatSpeech('Avisos desligados. Nenhum alarme fica agendado.');
+      }
+      this.syncNativeReminders();
+      this.renderActiveTab();
+      this.persist();
+      return;
+    }
     if (!('Notification' in window)) {
       alert('Este navegador/aparelho usa lembretes sonoros internos do Cat Line! Mantenha o som ativo.');
       state.notificationsEnabled = true;
@@ -9253,54 +9366,68 @@ class AppUI {
     // Banner superior removido
   }
 
+  // Agenda no Android os avisos de compromissos e prazos de metas. Cada compromisso usa a PROPRIA data,
+  // então o aviso chega mesmo com o app fechado. Só reenvia o que mudou desde a última sincronização.
   syncNativeReminders() {
-    if (!window.AndroidBlocker || typeof window.AndroidBlocker.scheduleReminder !== 'function') return;
-    if (!state.notificationsEnabled || state.cat.isRestMode) return;
+    const nb = window.AndroidBlocker;
+    if (!nb || (typeof nb.scheduleDeadline !== 'function' && typeof nb.scheduleReminder !== 'function')) return;
+    if (typeof CatLineReminderPlanner === 'undefined') return;
+    const notify = window.AndroidNotify;
+
+    if (!state.notificationsEnabled || state.cat.isRestMode) {
+      // Avisos desligados ou modo descanso: nada de alarme pendente no Android
+      if (this._nativePlan === undefined || (this._nativePlan && this._nativePlan.length > 0) || this._nativeCleared !== true) {
+        try {
+          if (notify && typeof notify.cancelAllReminders === 'function') notify.cancelAllReminders();
+          else (this._nativePlan || []).forEach(i => nb.cancelReminder(i.id));
+        } catch (e) {}
+        this._nativePlan = [];
+        this._nativeCleared = true;
+      }
+      return;
+    }
+    this._nativeCleared = false;
+
+    // Primeira sincronização desta abertura: começa do zero para não deixar alarme antigo para trás
+    if (this._nativePlan === undefined) {
+      try { if (notify && typeof notify.cancelAllReminders === 'function') notify.cancelAllReminders(); } catch (e) {}
+      this._nativePlan = [];
+    }
 
     const nowMs = Clock.now();
+    const plan = CatLineReminderPlanner.planReminders(
+      { occurrences: state.occurrences, goals: state.goals, dayKey: state.dayKey, nowMs },
+      {
+        makeLocalDate: (y, mo, d, h, mi) => {
+          const dt = Clock.newDate();
+          dt.setFullYear(y, mo - 1, d);
+          dt.setHours(h, mi, 0, 0);
+          return dt.getTime();
+        }
+      }
+    );
 
-    state.occurrences.forEach(o => {
+    // Compromissos que deixaram de estar pendentes perdem os avisos, uma vez por abertura
+    if (!this._cancelledIds) this._cancelledIds = new Set();
+    (state.occurrences || []).forEach(o => {
+      if (!o) return;
       const st = String(o.state || 'pending').toLowerCase();
-      if (st !== 'pendente' && st !== 'pending') {
-        try { window.AndroidBlocker.cancelReminder(o.id); } catch (e) {}
-        return;
+      if (st === 'pending' || st === 'pendente') { this._cancelledIds.delete(o.id); return; }
+      if (!this._cancelledIds.has(o.id)) {
+        this._cancelledIds.add(o.id);
+        try { nb.cancelReminder(o.id); } catch (e) {}
       }
-      const parts = (o.time || '19:00').split(':').map(Number);
-      if (isNaN(parts[0])) return;
-      const d = Clock.newDate();
-      d.setHours(parts[0], parts[1] || 0, 0, 0);
-      const goal = o.goalId ? (state.goals || []).find(g => g.id === o.goalId) : null;
-      this.scheduleNovelo(o.id, o.title, o.time, d.getTime(), (goal && goal.yarnColorId) || 'pink', nowMs, false);    });
-
-    // Prazos das metas (novelo de cada meta com a cor dela)
-    (state.goals || []).forEach(g => {
-      const id = 'goal-' + g.id;
-      if (g.archived || (g.progress >= 1) || !(g.remainingSeconds > 0)) {
-        try { window.AndroidBlocker.cancelReminder(id); } catch (e) {}
-        return;
-      }
-      const deadline = nowMs + g.remainingSeconds * 1000;
-      const dd = Clock.newDate(deadline);
-      const hhmm = String(dd.getHours()).padStart(2, '0') + ':' + String(dd.getMinutes()).padStart(2, '0');
-      this.scheduleNovelo(id, g.title, hhmm, deadline, g.yarnColorId || g.yarnColor || 'pink', nowMs, true);
     });
-  }
 
-  // Agenda os avisos escalonados do novelo: 1 dia antes (so metas), 1h antes, na hora e ao vencer.
-  scheduleNovelo(id, title, hhmm, atMs, color, nowMs, withDayBefore) {
-    const nb = window.AndroidBlocker;
-    if (!nb) return;
-    const H = 3600000;
-    const plan = [];
-    if (withDayBefore) plan.push(['PRE_DAY', atMs - 24 * H]);
-    plan.push(['PRE_HOUR', atMs - H], ['NOW', atMs], ['OVERDUE', atMs + (withDayBefore ? H : 15 * 60000)]);
-    plan.forEach(([kind, t]) => {
-      if (t <= nowMs) return;
+    const diff = CatLineReminderPlanner.diffPlans(this._nativePlan, plan.items);
+    diff.cancel.forEach(id => { try { nb.cancelReminder(id); } catch (e) {} });
+    diff.schedule.forEach(i => {
       try {
-        if (typeof nb.scheduleDeadline === 'function') nb.scheduleDeadline(id, title, hhmm, t, kind, color);
-        else if (kind === 'NOW') nb.scheduleReminder(id, title, hhmm, t);
+        if (typeof nb.scheduleDeadline === 'function') nb.scheduleDeadline(i.id, i.title, i.time, i.at, i.kind, i.color);
+        else if (i.kind === 'NOW') nb.scheduleReminder(i.id, i.title, i.time, i.at);
       } catch (e) {}
     });
+    this._nativePlan = plan.items;
   }
 
   async checkAppUpdate() {

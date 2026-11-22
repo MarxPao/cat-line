@@ -102,6 +102,7 @@ global.cancelAnimationFrame = () => {};
 const Clock = require('../web-preview/clock.js');
 global.CatLineClock = Clock;
 global.Clock = Clock;
+global.CatLineReminderPlanner = require('../web-preview/reminder-planner.js');
 
 // Carrega o app.js
 const appJsPath = path.join(__dirname, '..', 'web-preview', 'app.js');
@@ -135,7 +136,8 @@ state.occurrences.push({
   effort: 'G',
   reward: 20,
   recurrence: 'Todos os dias',
-  date: '2026-11-10',
+  // Amanhã às 23:59: sempre no futuro e dentro da janela. O agendamento respeita a data do compromisso.
+  date: (() => { const t = new Date(Date.now() + 86400000); return t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0'); })(),
   state: 'PENDENTE',
   delayMin: 0
 });

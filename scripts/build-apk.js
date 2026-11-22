@@ -89,7 +89,8 @@ const manifest = `<?xml version="1.0" encoding="utf-8"?>
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <queries>
@@ -163,6 +164,7 @@ const manifest = `<?xml version="1.0" encoding="utf-8"?>
                 <action android:name="com.catline.app.ACTION_COMPLETE_TASK" />
                 <action android:name="com.catline.app.ACTION_SNOOZE_TASK" />
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 
@@ -232,6 +234,7 @@ public class MainActivity extends Activity {
         fileBridge = new FileBridge(this, webView);
         webView.addJavascriptInterface(fileBridge, "AndroidFiles");
         webView.addJavascriptInterface(new WidgetBridge(this), "AndroidWidget");
+        webView.addJavascriptInterface(new NotifyBridge(this), "AndroidNotify");
         webView.loadUrl("file:///android_asset/index.html");
         setContentView(webView);
     }
