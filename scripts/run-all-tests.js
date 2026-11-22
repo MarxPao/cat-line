@@ -34,7 +34,8 @@ const testScripts = [
   'test-phase26-native-bridges.js',
   'test-phase27-reminder-planner.js',
   'test-phase28-blocker-setup.js',
-  'test-phase29-adb-enable.js'
+  'test-phase29-adb-enable.js',
+  'test-phase30-build-quoting.js'
 ];
 
 console.log('🐾 [Cat Line] Executando suíte completa de testes automatizados...\n');

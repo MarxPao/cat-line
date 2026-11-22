@@ -12,7 +12,8 @@ const vm = require('vm');
 console.log('=== INICIANDO TESTES DE ESCAPE HTML (XSS) ===\n');
 
 const appPath = path.join(__dirname, '..', 'web-preview', 'app.js');
-const source = fs.readFileSync(appPath, 'utf8');
+// Normaliza CRLF: no Windows o Git pode converter os fins de linha ao baixar o repositório
+const source = fs.readFileSync(appPath, 'utf8').split('\r\n').join('\n');
 
 // 1. Comportamento da funcao
 const match = source.match(/function escHtml\(value\) \{[\s\S]*?\n\}\n/);
