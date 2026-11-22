@@ -51,17 +51,31 @@ jobs:
             echo "release=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # O runner não traz a versão 33 das ferramentas. Instala as versões exatas que o build espera.
+      # ANDROID_HOME vem do ambiente do runner e não existe no contexto env do workflow, então tudo é feito no shell.
+      - name: Instalar ferramentas do Android
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            echo "::error::sdkmanager não encontrado em $SDKMANAGER"
+            ls "$SDK_ROOT" "$SDK_ROOT/cmdline-tools" || true
+            exit 1
+          fi
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" --install "build-tools;33.0.2" "platforms;android-33"
+          test -x "$SDK_ROOT/build-tools/33.0.2/aapt2"
+          test -f "$SDK_ROOT/platforms/android-33/android.jar"
+          echo "SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+
       - name: Build CatLine.apk
         env:
-          ANDROID_BUILD_TOOLS: ${{ env.ANDROID_HOME }}/build-tools/33.0.2
-          ANDROID_JAR: ${{ env.ANDROID_HOME }}/platforms/android-33/android.jar
           CATLINE_KEYSTORE_PASS: ${{ secrets.CATLINE_KEYSTORE_PASS }}
           CATLINE_KEY_ALIAS: ${{ secrets.CATLINE_KEY_ALIAS }}
           CATLINE_KEY_PASS: ${{ secrets.CATLINE_KEY_PASS }}
         run: |
-          if [ ! -d "$ANDROID_BUILD_TOOLS" ]; then
-            export ANDROID_BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/33.* | tail -n1)
-          fi
+          export ANDROID_BUILD_TOOLS="$SDK_ROOT/build-tools/33.0.2"
+          export ANDROID_JAR="$SDK_ROOT/platforms/android-33/android.jar"
           node scripts/build-apk.js
 
       - name: Ler versao do APK
