@@ -49,6 +49,8 @@ set CATLINE_KEYSTORE=C:\caminho\catline-release.keystore
 set CATLINE_KEYSTORE_PASS=sua-senha
 ```
 Sem essas variáveis o build usa uma chave local de desenvolvimento, que não atualiza instalações de release.
+
+Ferramentas do Android: o build espera `tools-apk/build-tools/android-13` (build-tools 33.0.2) e `tools-apk/android-33.jar` (android.jar da plataforma 33). Baixe os dois pacotes do repositório oficial do Google, `https://dl.google.com/android/repository/build-tools_r33.0.2-windows.zip` e `platform-33-ext3_r03.zip`, e confira o SHA-1 no `repository2-3.xml` do mesmo endereço. A pasta `tools-apk/` não vai para o Git. Defina `JAVA_HOME` apontando para um JDK 17.
 ```bash
 node scripts/build-single-file-html.js
 node scripts/build-apk.js

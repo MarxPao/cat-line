@@ -30,7 +30,8 @@ const testScripts = [
   'test-phase22-mood.js',
   'test-phase23-step-templates.js',
   'test-phase24-ics-import.js',
-  'test-phase25-single-file.js'
+  'test-phase25-single-file.js',
+  'test-phase26-native-bridges.js'
 ];
 
 console.log('🐾 [Cat Line] Executando suíte completa de testes automatizados...\n');

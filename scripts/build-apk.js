@@ -165,6 +165,18 @@ const manifest = `<?xml version="1.0" encoding="utf-8"?>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+
+        <receiver
+            android:name="com.catline.app.CatLineWidgetProvider"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_hoje_info" />
+        </receiver>
     </application>
 </manifest>`;
 const manifestPath = path.join(BUILD_DIR, 'AndroidManifest.xml');
@@ -176,6 +188,7 @@ console.log("4. Gerando MainActivity.java nativo...");
 const mainActivityJava = `package com.catline.app;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.os.Bundle;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -186,6 +199,7 @@ import android.graphics.Color;
 
 public class MainActivity extends Activity {
     private WebView webView;
+    private FileBridge fileBridge;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -215,8 +229,17 @@ public class MainActivity extends Activity {
         webView.setWebViewClient(new WebViewClient());
         webView.setWebChromeClient(new WebChromeClient());
         webView.addJavascriptInterface(new BlockerBridge(this), "AndroidBlocker");
+        fileBridge = new FileBridge(this, webView);
+        webView.addJavascriptInterface(fileBridge, "AndroidFiles");
+        webView.addJavascriptInterface(new WidgetBridge(this), "AndroidWidget");
         webView.loadUrl("file:///android_asset/index.html");
         setContentView(webView);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (fileBridge != null && fileBridge.handleResult(requestCode, resultCode, data)) return;
+        super.onActivityResult(requestCode, resultCode, data);
     }
 
     @Override

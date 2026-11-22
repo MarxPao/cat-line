@@ -17,6 +17,11 @@ Todas as alterações notáveis do projeto Cat Line são documentadas neste arqu
 - Botão "Sugerir passos" nas metas, com ideias por categoria, 100% offline. A usuária escolhe um a um ou adiciona todos.
 - Importação de arquivos `.ics` na Agenda: converte para o horário de Brasília, entende repetições semanais, mensais e diárias, exceções e remarcações, e não duplica ao importar de novo.
 
+### 📱 Android nativo
+- Seletor de arquivos nativo: "Importar backup" e "Importar .ics" agora abrem o seletor do Android dentro do APK, e "Exportar backup" grava o arquivo pelo seletor de destino. Antes, o WebView não abria input de arquivo nem baixava Blob. Não pede nenhuma permissão de armazenamento.
+- Widget "Hoje" na tela inicial com os próximos 3 compromissos e botão "Feito", pelo mesmo caminho das notificações.
+- Compilado e assinado com o SDK 33 sem erros. Ainda não testado num aparelho.
+
 ### 🐛 Correções
 - Adicionar passo a uma meta pelo formulário salvava sempre o título "Novo Passo" sem estimativa.
 - Marcar um passo como feito, e mover um passo para cima ou para baixo, falhavam porque o app chamava métodos que o motor de metas não tem.

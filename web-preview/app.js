@@ -20,6 +20,37 @@ function escHtml(value) {
 }
 if (typeof window !== 'undefined') window.escHtml = escHtml;
 
+// Seletor de arquivos nativo do Android (ponte AndroidFiles). Fora do APK, os botões usam o input do navegador.
+const NativeFiles = {
+  _pending: {},
+  _seq: 0,
+  available() {
+    return typeof window !== 'undefined' && !!window.AndroidFiles
+      && typeof window.AndroidFiles.pickTextFile === 'function';
+  },
+  _request(start) {
+    return new Promise((resolve, reject) => {
+      const token = 'f' + (++this._seq) + '_' + Math.random().toString(36).slice(2, 8);
+      this._pending[token] = { resolve, reject };
+      try { start(token); } catch (err) { delete this._pending[token]; reject(err); }
+    });
+  },
+  pickText() {
+    return this._request(token => window.AndroidFiles.pickTextFile(token));
+  },
+  saveText(fileName, mime, text) {
+    return this._request(token => window.AndroidFiles.saveTextFile(token, fileName, mime, text));
+  },
+  // Chamado pelo Java: window.CatLineNative.onResult({ token, ok, name, text, error })
+  onResult(res) {
+    const p = res && this._pending[res.token];
+    if (!p) return;
+    delete this._pending[res.token];
+    if (res.ok) p.resolve(res); else p.reject(new Error(res.error || 'failed'));
+  }
+};
+if (typeof window !== 'undefined') window.CatLineNative = NativeFiles;
+
 // Provedor centralizado de relógio determinístico (clock.js)
 const _clockImpl = (typeof CatLineClock !== 'undefined')
   ? CatLineClock
@@ -1447,8 +1478,31 @@ function syncNativeBlocker() {
   } catch (e) {}
 }
 
+// Resumo do dia para o widget da tela inicial. Só envia quando algo mudou.
+let _lastWidgetJson = '';
+function syncWidgetSnapshot() {
+  try {
+    if (typeof window === 'undefined' || !window.AndroidWidget || typeof window.AndroidWidget.updateWidget !== 'function') return;
+    const today = (state.occurrences || []).filter(o => o && o.date === state.dayKey && o.state !== 'rescheduled');
+    const isDone = o => o.state === 'done' || o.state === 'FEITO';
+    const pending = today
+      .filter(o => !isDone(o) && o.state !== 'missed')
+      .sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')));
+    const json = JSON.stringify({
+      day: state.dayKey,
+      doneToday: today.filter(isDone).length,
+      totalToday: today.length,
+      items: pending.slice(0, 3).map(o => ({ id: String(o.id), title: String(o.title || '').slice(0, 40), time: String(o.time || ''), color: 'pink' }))
+    });
+    if (json === _lastWidgetJson) return;
+    _lastWidgetJson = json;
+    window.AndroidWidget.updateWidget(json);
+  } catch (e) {}
+}
+
 function saveStateToDeviceStorage() {
   syncNativeBlocker();
+  syncWidgetSnapshot();
   try {
     const toSave = {
       schemaVersion: 2,
@@ -5000,6 +5054,15 @@ class AppUI {
 
   // Importação de calendário .ics, 100% local. Nada é salvo sem confirmação.
   triggerImportIcs() {
+    if (NativeFiles.available()) {
+      NativeFiles.pickText()
+        .then(res => this.applyIcsText(res.text))
+        .catch(err => {
+          if (err && err.message === 'cancelled') return;
+          alert('Não consegui abrir esse arquivo. Tente escolher outro.');
+        });
+      return;
+    }
     const input = document.getElementById('ics-import-input');
     if (input) input.click();
   }
@@ -5010,9 +5073,15 @@ class AppUI {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (e) => {
+      try { this.applyIcsText(String(e.target.result || '')); } finally { if (input) input.value = ''; }
+    };
+    reader.readAsText(file);
+  }
+
+  applyIcsText(text) {
       try {
         const horizonDays = 60;
-        const parsed = CatLineIcsImport.importFromIcs(String(e.target.result || ''), { fromDayKey: state.dayKey, horizonDays });
+        const parsed = CatLineIcsImport.importFromIcs(String(text || ''), { fromDayKey: state.dayKey, horizonDays });
         const conv = CatLineIcsImport.toOccurrences(parsed.items, state.occurrences);
         const s = parsed.summary;
         if (s.events === 0) {
@@ -5039,11 +5108,7 @@ class AppUI {
       } catch (err) {
         if (typeof console !== 'undefined' && console.error) console.error('importIcsFile error:', err);
         alert('Não consegui ler esse arquivo de calendário.');
-      } finally {
-        if (input) input.value = '';
       }
-    };
-    reader.readAsText(file);
   }
 
   // CRUD de Hábitos
@@ -5882,22 +5947,45 @@ class AppUI {
       habits: state.habits
     };
 
-    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+    const json = JSON.stringify(backupData, null, 2);
+    const fileName = `catline_backup_${state.dayKey}.json`;
+    const finish = () => {
+      audio.playMeowCelebrate();
+      this.spawnPixelConfetti();
+      alert("Backup JSON completo exportado com sucesso! Todos os seus mimos, hábitos, metas e compromissos estão salvos.");
+    };
+
+    // No APK, o WebView não baixa Blob: o seletor nativo do Android grava o arquivo.
+    if (NativeFiles.available()) {
+      NativeFiles.saveText(fileName, 'application/json', json).then(finish).catch(err => {
+        if (err && err.message === 'cancelled') return;
+        alert('Não consegui salvar o backup. Tente escolher outra pasta.');
+      });
+      return;
+    }
+
+    const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `catline_backup_${state.dayKey}.json`;
+    a.download = fileName;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-
-    audio.playMeowCelebrate();
-    this.spawnPixelConfetti();
-    alert("Backup JSON completo exportado com sucesso! Todos os seus mimos, hábitos, metas e compromissos estão salvos.");
+    finish();
   }
 
   triggerImportBackup() {
+    if (NativeFiles.available()) {
+      NativeFiles.pickText()
+        .then(res => this.applyBackupText(res.text))
+        .catch(err => {
+          if (err && err.message === 'cancelled') return;
+          alert('Não consegui abrir esse arquivo. Tente escolher outro.');
+        });
+      return;
+    }
     const input = document.getElementById('json-backup-input');
     if (input) input.click();
   }
@@ -5906,9 +5994,12 @@ class AppUI {
     const file = event.target.files && event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = (e) => this.applyBackupText(e.target.result);
+    reader.readAsText(file);
+  }
+
+  applyBackupText(raw) {
       try {
-        const raw = e.target.result;
         const engine = (typeof backupEngine !== 'undefined' && backupEngine)
           ? backupEngine
           : (typeof CatLineBackupEngine !== 'undefined' ? (CatLineBackupEngine.backupEngine || CatLineBackupEngine) : null);
@@ -5949,8 +6040,6 @@ class AppUI {
         if (typeof console !== 'undefined' && console.error) console.error('importJsonBackup error:', err);
         alert("Erro ao ler arquivo de backup JSON.");
       }
-    };
-    reader.readAsText(file);
   }
 
   renderTabInsights() {

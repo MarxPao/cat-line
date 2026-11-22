@@ -38,6 +38,7 @@ public class ReminderReceiver extends BroadcastReceiver {
                 NotificationHelper.cancelReminder(context, id);  // cancela avisos futuros dessa tarefa
             }
             NotificationHelper.recordTaskCompletedLocally(context, id, title);
+            CatLineWidgetProvider.markDoneAndRefresh(context, id);
             NotificationHelper.showDoneCelebration(context, id, title, color);
 
         } else if (NotificationHelper.ACTION_SNOOZE_TASK.equals(action)) {
