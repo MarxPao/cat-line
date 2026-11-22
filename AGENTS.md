@@ -1,5 +1,7 @@
 # AGENTS.md — Regras Permanentes do Projeto Dead Line
 
+> Nome público do app: **Cat Line**. "Dead Line" é o codinome usado nos módulos Kotlin e na documentação de arquitetura. Hoje o APK distribuído é o app web empacotado (`web-preview/` + `android-src/`); os módulos Kotlin são a reescrita nativa, ainda em esqueleto.
+
 ## 1. Contexto e Objetivo
 **Dead Line** é um aplicativo Android nativo gamificado de agenda, hábitos, metas e foco em pixel art 8-bit, protagonizado por uma gatinha calico e um novelo de lã.
 Antes de iniciar qualquer pacote de trabalho (WP), leia:

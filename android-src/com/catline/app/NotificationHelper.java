@@ -11,6 +11,7 @@ import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.net.Uri;
 import android.os.Build;
 import android.util.Log;
 
@@ -118,6 +119,21 @@ public final class NotificationHelper {
             }
         } catch (Exception e) {
             Log.e(TAG, "Falha ao cancelar lembrete", e);
+        }
+    }
+
+    /** Cancela todos os avisos agendados, de todas as tarefas. Usado ao desligar os avisos ou ao recomecar a agenda. */
+    public static void cancelAllScheduled(Context ctx) {
+        try {
+            SharedPreferences sp = ctx.getSharedPreferences(PREFS_SCHEDULE, Context.MODE_PRIVATE);
+            java.util.HashSet<String> ids = new java.util.HashSet<String>();
+            for (String key : sp.getAll().keySet()) {
+                int cut = key.lastIndexOf('|');
+                ids.add(cut > 0 ? key.substring(0, cut) : key);
+            }
+            for (String id : ids) cancelReminder(ctx, id);
+        } catch (Exception e) {
+            Log.e(TAG, "Falha ao cancelar todos os avisos", e);
         }
     }
 
@@ -272,6 +288,8 @@ public final class NotificationHelper {
     private static Intent buildTriggerIntent(Context ctx, String id, String title, String time, String kind, String color) {
         Intent intent = new Intent(ctx, ReminderReceiver.class);
         intent.setAction(ACTION_TRIGGER_REMINDER);
+        // Dados unicos por tarefa e estagio: sem isso, dois avisos com o mesmo codigo de pedido se sobrescrevem
+        intent.setData(Uri.parse("catline://reminder/" + Uri.encode(String.valueOf(id)) + "/" + kind));
         intent.putExtra(EXTRA_TASK_ID, id);
         intent.putExtra(EXTRA_TASK_TITLE, title);
         intent.putExtra(EXTRA_TASK_TIME, time);

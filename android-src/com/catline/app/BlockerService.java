@@ -25,6 +25,9 @@ import android.widget.TextView;
  */
 public class BlockerService extends AccessibilityService {
     private static final long DEBOUNCE_MS = 900L;
+    private static final long EVENT_THROTTLE_MS = 300L;
+    private String lastEventPkg = "";
+    private long lastEventAt = 0L;
     private String lastPkg = "";
     private long lastAt = 0L;
     private WindowManager wm;
@@ -55,6 +58,18 @@ public class BlockerService extends AccessibilityService {
         if (event != null && event.getPackageName() != null) {
             pkg = event.getPackageName().toString();
         }
+
+        // Rolar a tela de qualquer app gera dezenas de eventos por segundo. Avaliar o mesmo app de novo em menos
+        // de 300 ms nao muda a decisao e gastava bateria, entao esses eventos sao ignorados.
+        long eventNow = SystemClock.elapsedRealtime();
+        if (pkg != null && pkg.equals(lastEventPkg) && eventNow - lastEventAt < EVENT_THROTTLE_MS) {
+            return;
+        }
+        if (pkg != null) {
+            lastEventPkg = pkg;
+            lastEventAt = eventNow;
+        }
+
         if (pkg == null || isIgnoredSystemPackage(pkg)) {
             AccessibilityNodeInfo root = null;
             try {

@@ -9,6 +9,48 @@
  * - Cada meta com um novelinho de cor diferente que muda na mão da gatinha ao ser selecionado
  */
 
+// Escapa texto digitado pela usuaria antes de colocar em innerHTML (evita injecao de HTML/JS na ponte nativa).
+function escHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+if (typeof window !== 'undefined') window.escHtml = escHtml;
+
+// Seletor de arquivos nativo do Android (ponte AndroidFiles). Fora do APK, os botões usam o input do navegador.
+const NativeFiles = {
+  _pending: {},
+  _seq: 0,
+  available() {
+    return typeof window !== 'undefined' && !!window.AndroidFiles
+      && typeof window.AndroidFiles.pickTextFile === 'function';
+  },
+  _request(start) {
+    return new Promise((resolve, reject) => {
+      const token = 'f' + (++this._seq) + '_' + Math.random().toString(36).slice(2, 8);
+      this._pending[token] = { resolve, reject };
+      try { start(token); } catch (err) { delete this._pending[token]; reject(err); }
+    });
+  },
+  pickText() {
+    return this._request(token => window.AndroidFiles.pickTextFile(token));
+  },
+  saveText(fileName, mime, text) {
+    return this._request(token => window.AndroidFiles.saveTextFile(token, fileName, mime, text));
+  },
+  // Chamado pelo Java: window.CatLineNative.onResult({ token, ok, name, text, error })
+  onResult(res) {
+    const p = res && this._pending[res.token];
+    if (!p) return;
+    delete this._pending[res.token];
+    if (res.ok) p.resolve(res); else p.reject(new Error(res.error || 'failed'));
+  }
+};
+if (typeof window !== 'undefined') window.CatLineNative = NativeFiles;
+
 // Provedor centralizado de relógio determinístico (clock.js)
 const _clockImpl = (typeof CatLineClock !== 'undefined')
   ? CatLineClock
@@ -820,7 +862,8 @@ const betaReportEngine = {
         foco: Boolean(st.flags && (st.flags.FOCO !== false && st.flags.foco !== false)),
         metasPassos: Boolean(st.flags && st.flags.METAS_PASSOS !== false),
         compromissos: Boolean(st.flags && st.flags.COMPROMISSOS !== false),
-        logSemanal: Boolean(st.flags && st.flags.LOG_SEMANAL !== false)
+        logSemanal: Boolean(st.flags && st.flags.LOG_SEMANAL !== false),
+        humor: Boolean(st.flags && st.flags.HUMOR !== false)
       },
       telemetry: {
         occurrencesTotal: totalTasks,
@@ -1022,7 +1065,8 @@ const state = {
     NOVELO_GRACINHAS: true,
     METAS_PASSOS: true,
     COMPROMISSOS: true,
-    LOG_SEMANAL: true
+    LOG_SEMANAL: true,
+    HUMOR: true
   },
   set moduleFlags(flags) {
     if (flags && typeof flags === 'object') {
@@ -1060,6 +1104,7 @@ const state = {
   rewardEvents: [],
   dayClosures: [],
   weeklyLogs: [],
+  moodLog: [],
   scheduledStepPreFill: null,
   editingStepId: null,
   activeStepPrompt: null,
@@ -1433,8 +1478,43 @@ function syncNativeBlocker() {
   } catch (e) {}
 }
 
+// Resumo do dia para o widget da tela inicial. Só envia quando algo mudou.
+let _lastWidgetJson = '';
+function syncWidgetSnapshot() {
+  try {
+    if (typeof window === 'undefined' || !window.AndroidWidget || typeof window.AndroidWidget.updateWidget !== 'function') return;
+    const today = (state.occurrences || []).filter(o => o && o.date === state.dayKey && o.state !== 'rescheduled');
+    const isDone = o => o.state === 'done' || o.state === 'FEITO';
+    const pending = today
+      .filter(o => !isDone(o) && o.state !== 'missed')
+      .sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')));
+    const json = JSON.stringify({
+      day: state.dayKey,
+      doneToday: today.filter(isDone).length,
+      totalToday: today.length,
+      items: pending.slice(0, 3).map(o => ({ id: String(o.id), title: String(o.title || '').slice(0, 40), time: String(o.time || ''), color: 'pink' }))
+    });
+    if (json === _lastWidgetJson) return;
+    _lastWidgetJson = json;
+    window.AndroidWidget.updateWidget(json);
+  } catch (e) {}
+}
+
+// Reagenda os avisos nativos depois de salvar, sem esperar o app voltar para a tela.
+let _reminderSyncTimer = null;
+function scheduleReminderSync() {
+  if (typeof window === 'undefined' || !window.AndroidBlocker || !window.app) return;
+  if (_reminderSyncTimer) clearTimeout(_reminderSyncTimer);
+  _reminderSyncTimer = setTimeout(() => {
+    _reminderSyncTimer = null;
+    try { window.app.syncNativeReminders(); } catch (e) {}
+  }, 800);
+}
+
 function saveStateToDeviceStorage() {
   syncNativeBlocker();
+  syncWidgetSnapshot();
+  scheduleReminderSync();
   try {
     const toSave = {
       schemaVersion: 2,
@@ -1457,6 +1537,7 @@ function saveStateToDeviceStorage() {
       rewardEvents: state.rewardEvents || [],
       dayClosures: state.dayClosures || [],
       weeklyLogs: state.weeklyLogs || [],
+      moodLog: state.moodLog || [],
       habits: state.habits,
       goals: state.goals,
       briefing: state.briefing,
@@ -1517,6 +1598,9 @@ function loadStateFromDeviceStorage() {
     if (Array.isArray(data.rewardEvents)) state.rewardEvents = data.rewardEvents;
     if (Array.isArray(data.dayClosures)) state.dayClosures = data.dayClosures;
     if (Array.isArray(data.weeklyLogs)) state.weeklyLogs = data.weeklyLogs;
+    if (Array.isArray(data.moodLog)) {
+      state.moodLog = (typeof CatLineMoodEngine !== 'undefined') ? CatLineMoodEngine.sanitizeLog(data.moodLog) : data.moodLog;
+    }
 
     if (data.currencies) state.currencies = { ...state.currencies, ...data.currencies };
     if (data.selectedGoalId) state.selectedGoalId = data.selectedGoalId;
@@ -2444,6 +2528,7 @@ class AppUI {
     this.startReminderCheckerLoop();
     syncNativeBlocker();
     this.checkNativeCompletedTasks();
+    this.autoEnableNativeNotifications();
     this.syncNativeReminders();
     this.checkAppUpdate();
     document.addEventListener('visibilitychange', () => {
@@ -2575,6 +2660,7 @@ class AppUI {
       { key: 'METAS_PASSOS', label: 'Metas com Passos' },
       { key: 'COMPROMISSOS', label: 'Compromissos & Check-in' },
       { key: 'LOG_SEMANAL', label: 'Log Semanal & Carta' },
+      { key: 'HUMOR', label: 'Humor do Dia' },
       { key: 'INSIGHTS', label: 'O Fio & Insights' },
       { key: 'LOJA', label: 'Lojinha & Cosméticos' },
       { key: 'CONVERSA', label: 'Chat & Diálogo' },
@@ -2699,9 +2785,11 @@ class AppUI {
       ` : ''}
       <!-- Balão de Fala com a Gatinha -->
       <div class="speech-bubble-container">
-        <div class="speech-bubble-box" id="speech-bubble-text">${state.cat.speechText}</div>
+        <div class="speech-bubble-box" id="speech-bubble-text">${escHtml(state.cat.speechText)}</div>
         <div class="speech-bubble-tail"></div>
       </div>
+
+      ${this.renderMoodCardHtml()}
 
       <!-- Banner Dinâmico: Espelho da Rotina da Cliente -->
       ${(() => {
@@ -2731,7 +2819,7 @@ class AppUI {
               <div class="mobile-stack-info">
                 <span style="font-size: 11px; font-weight: 700; color: ${activeObj ? PALETTE.leafGreen : PALETTE.orange}; letter-spacing: 0.5px;">⚡ FAZENDO AGORA COM A GATINHA:</span>
                 <div style="font-size: 16px; font-weight: 700; color: ${PALETTE.ink}; margin-top: 2px; line-height: 1.25;">
-                  ${activeObj ? activeObj.title : "Nenhuma tarefa em execução manual"}
+                  ${activeObj ? escHtml(activeObj.title) : "Nenhuma tarefa em execução manual"}
                 </div>
                 <span style="font-size: 13px; color: ${PALETTE.cozyPurple}; font-weight: 700; display: block; margin-top: 2px;">
                   ${statusLabel}
@@ -2788,7 +2876,7 @@ class AppUI {
             return `
               <button class="yarn-chip ${isSel ? 'selected' : ''}" onclick="window.app.selectGoalYarn('${g.id}')">
                 <canvas class="yarn-color-dot mini-yarn-canvas" width="22" height="22" data-color="${g.yarnColorId}"></canvas>
-                <span>${g.title}</span>
+                <span>${escHtml(g.title)}</span>
               </button>
             `;
           }).join('')}
@@ -2891,7 +2979,7 @@ class AppUI {
             </div>
 
             <p style="font-size: 14px; color: ${PALETTE.ink}; margin: 6px 0;">
-              Tarefa: <strong>${activeTitle}</strong>
+              Tarefa: <strong>${escHtml(activeTitle)}</strong>
             </p>
             <span style="font-size: 12px; color: ${PALETTE.grayDark};">A gatinha está concentrada no quarto puxando o fio com você!</span>
 
@@ -3151,8 +3239,6 @@ class AppUI {
     if (goal) {
       if (typeof goalStepEngine !== 'undefined' && goalStepEngine && typeof goalStepEngine.completeStep === 'function') {
         goalStepEngine.completeStep(goal, stepId);
-      } else if (typeof goalStepEngine !== 'undefined' && goalStepEngine && typeof goalStepEngine.toggleStepDone === 'function') {
-        goalStepEngine.toggleStepDone(goal, stepId);
       } else {
         const step = (goal.steps || []).find(s => s.id === stepId);
         if (step) {
@@ -3390,7 +3476,7 @@ class AppUI {
             <p style="font-size: 14px; color: ${PALETTE.ink}; margin: 8px 0; line-height: 1.4;">
               Esse passo da meta foi concluído?
               <br>
-              <strong style="color: ${PALETTE.orange}; font-size: 15px;">${p.stepTitle}</strong>
+              <strong style="color: ${PALETTE.orange}; font-size: 15px;">${escHtml(p.stepTitle)}</strong>
             </p>
             <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 14px;">
               <button class="pixel-btn btn-green" style="width: 100%; min-height: 48px; font-size: 14px;" onclick="window.app.confirmStepDoneFromCommitment('${p.goalId}', '${p.stepId}')">
@@ -3420,7 +3506,7 @@ class AppUI {
             <div style="font-size: 28px; margin-bottom: 6px;">🕒🐾</div>
             <h3 style="font-size: 16px; margin: 0 0 6px 0; color: ${PALETTE.cozyPurple};">Check-in Retroativo</h3>
             <p style="font-size: 13px; color: ${PALETTE.ink}; margin: 6px 0;">
-              Que horas você cumpriu <strong>${r.title}</strong>?
+              Que horas você cumpriu <strong>${escHtml(r.title)}</strong>?
             </p>
             <div style="margin: 12px 0;">
               <input type="time" id="retro-checkin-time-input" class="pixel-input" value="${r.time}" style="font-size: 16px; padding: 8px; text-align: center; width: 140px;">
@@ -3453,7 +3539,7 @@ class AppUI {
             <div style="font-size: 28px; margin-bottom: 6px;">🗓️🐾</div>
             <h3 style="font-size: 16px; margin: 0 0 6px 0; color: ${PALETTE.orange};">Remarcar Compromisso</h3>
             <p style="font-size: 13px; color: ${PALETTE.ink}; margin: 6px 0;">
-              Escolha o novo momento para <strong>${s.title}</strong>:
+              Escolha o novo momento para <strong>${escHtml(s.title)}</strong>:
             </p>
             <div style="display: flex; gap: 8px; margin: 12px 0; justify-content: center;">
               <input type="date" id="reschedule-date-input" class="pixel-input" value="${s.newDate}" style="font-size: 14px; padding: 6px;">
@@ -3860,7 +3946,7 @@ class AppUI {
               ${unresolvedList.map(item => `
                 <div class="closure-task-card" id="closure-item-${item.id}">
                   <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                    <strong style="font-size: 14px; color: ${PALETTE.ink};">${item.title}</strong>
+                    <strong style="font-size: 14px; color: ${PALETTE.ink};">${escHtml(item.title)}</strong>
                     <span style="font-size: 12px; font-weight: 700; color: #666;">Planejado: ${item.time || '12:00'}</span>
                   </div>
                   <div style="display: flex; align-items: center; gap: 6px;">
@@ -4136,7 +4222,7 @@ class AppUI {
               <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 4px;">
                 ${s.goals.map(g => `
                   <div style="background: #ffffff; border: 1.5px solid ${PALETTE.ink}; border-radius: 4px; padding: 6px; font-size: 12px; display: flex; justify-content: space-between;">
-                    <span>${g.title}</span>
+                    <span>${escHtml(g.title)}</span>
                     <strong>${g.stepsDoneThisWeek} passos concluídos</strong>
                   </div>
                 `).join('')}
@@ -4156,7 +4242,7 @@ class AppUI {
               <span style="font-size: 18px;">🐱💌</span>
               <strong style="color: ${PALETTE.cozyPurple}; font-size: 13px;">Carta da Gatinha:</strong>
             </div>
-            <p style="margin: 0;">${s.letter.renderedText}</p>
+            <p style="margin: 0;">${escHtml(s.letter.renderedText)}</p>
           </div>
 
           <!-- Sugestão Gentil de Horário -->
@@ -4164,7 +4250,7 @@ class AppUI {
             <div style="background: #f0f7ff; border: 2px solid ${PALETTE.windowBlue}; border-radius: 4px; padding: 10px; margin: 10px 0;">
               <strong style="color: ${PALETTE.windowBlue}; font-size: 13px; display: block; margin-bottom: 4px;">💡 Sugestão Gentil de Ritmo:</strong>
               <p style="font-size: 12px; margin: 0 0 8px 0; color: ${PALETTE.ink};">
-                Parece que você tendeu a cumprir <strong>${s.gentleSuggestion.commitmentTitle}</strong> com cerca de ${s.gentleSuggestion.medianLateMinutes} minutos de flexibilidade. Que tal ajustar para <strong>${s.gentleSuggestion.proposedNewTime}</strong>?
+                Parece que você tendeu a cumprir <strong>${escHtml(s.gentleSuggestion.commitmentTitle)}</strong> com cerca de ${s.gentleSuggestion.medianLateMinutes} minutos de flexibilidade. Que tal ajustar para <strong>${s.gentleSuggestion.proposedNewTime}</strong>?
               </p>
               <button class="pixel-btn btn-gold" style="width: 100%; min-height: 48px; font-size: 13px;" onclick="window.app.acceptGentleSuggestion('${s.gentleSuggestion.commitmentId}', '${s.gentleSuggestion.proposedNewTime}')">
                 ✓ Aceitar sugestão de horário
@@ -4251,7 +4337,7 @@ class AppUI {
           <div style="flex: 1;">
             <strong style="color: #6c3483; font-size: 15px; display: block; margin-bottom: 4px;">Dica de Calibração da Gatinha</strong>
             <p style="font-size: 13px; color: ${PALETTE.ink}; margin: 0 0 10px 0; line-height: 1.4;">
-              ${sug.text}
+              ${escHtml(sug.text)}
             </p>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
               <button class="pixel-btn btn-sm btn-green" onclick="window.app.acceptCalibration()">Aceitar Ajuste ✓</button>
@@ -4311,7 +4397,7 @@ class AppUI {
           <div style="flex: 1;">
             <strong style="color: #6c3483; font-size: 15px; display: block; margin-bottom: 4px;">Acolhimento da Gatinha · Replanejamento</strong>
             <p style="font-size: 13px; color: ${PALETTE.ink}; margin: 0 0 10px 0; line-height: 1.4;">
-              ${plan.text}
+              ${escHtml(plan.text)}
             </p>
             <div style="background: #fff; border: 1px dashed #8e44ad; border-radius: 4px; padding: 8px; margin-bottom: 10px; font-size: 13px;">
               <strong style="color: #6c3483;">Proposta para amanhã:</strong>
@@ -4594,6 +4680,56 @@ class AppUI {
     this.renderActiveTab();
   }
 
+  // Check-in de humor diário (módulo HUMOR, AD-11)
+  renderMoodCardHtml() {
+    if (state.flags.HUMOR === false || typeof CatLineMoodEngine === 'undefined') return '';
+    const today = CatLineMoodEngine.getMoodForDay(state.moodLog, state.dayKey);
+    const buttons = CatLineMoodEngine.LEVELS.map(l => {
+      const selected = today && today.level === l.level;
+      return `
+        <button class="pixel-btn btn-sm ${selected ? 'btn-green' : 'btn-secondary'}" style="flex: 1; min-width: 0; padding: 6px 2px; display: flex; flex-direction: column; align-items: center; gap: 2px;"
+          onclick="window.app.setMood(${l.level})" aria-label="${escHtml(l.label)}" aria-pressed="${selected ? 'true' : 'false'}">
+          <span style="font-size: 22px; line-height: 1;">${l.emoji}</span>
+          <span style="font-size: 10px; line-height: 1.1;">${escHtml(l.label)}</span>
+        </button>`;
+    }).join('');
+
+    const insight = CatLineMoodEngine.moodInsight(state.moodLog, state.occurrences, state.dayKey);
+    let insightHtml = '';
+    if (insight.status === 'observando' && insight.daysCollected > 0) {
+      insightHtml = `<div style="font-size: 12px; color: ${PALETTE.grayDark}; margin-top: 6px;">🐾 Estamos nos conhecendo melhor: ${insight.daysCollected} de ${insight.daysNeeded} dias de humor.</div>`;
+    } else if (insight.status === 'ok') {
+      insightHtml = `<div style="font-size: 12px; color: ${PALETTE.cozyPurple}; margin-top: 6px; line-height: 1.35;">💜 ${escHtml(insight.message)}</div>`;
+    }
+
+    return `
+      <div class="pixel-card cream" style="margin-bottom: 8px; padding: 10px 12px;">
+        <div style="font-size: 13px; font-weight: 700; color: ${PALETTE.ink}; margin-bottom: 6px;">
+          ${today ? 'Seu humor de hoje' : 'Como você está hoje?'}
+        </div>
+        <div style="display: flex; gap: 4px;">${buttons}</div>
+        ${insightHtml}
+      </div>`;
+  }
+
+  setMood(level) {
+    if (typeof CatLineMoodEngine === 'undefined' || state.flags.HUMOR === false) return;
+    try {
+      state.moodLog = CatLineMoodEngine.recordMood(state.moodLog, {
+        dayKey: state.dayKey,
+        level,
+        atIso: Clock.isoString()
+      });
+    } catch (e) {
+      return;
+    }
+    const info = CatLineMoodEngine.levelInfo(level);
+    try { audio.playBlip(); } catch (e) {}
+    this.persist();
+    this.renderActiveTab();
+    if (info) this.setCatSpeech(info.speech);
+  }
+
   selectAgendaDay(dayStr) {
     state.agendaSelectedDay = dayStr;
     audio.playBlip();
@@ -4710,18 +4846,26 @@ class AppUI {
 
     this.contentEl.innerHTML = `
       ${this.renderAgendaWeekStrip(selDay)}
+      ${typeof CatLineIcsImport !== 'undefined' ? `
+        <div class="pixel-card cream" style="padding: 10px 12px; margin-bottom: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px; justify-content: space-between;">
+            <span style="font-size: 13px; line-height: 1.3;">📥 Já usa outra agenda? Traga seus compromissos de um arquivo de calendário.</span>
+            <button class="pixel-btn btn-sm btn-purple" style="min-height: 44px; white-space: nowrap;" onclick="window.app.triggerImportIcs()">Importar .ics</button>
+          </div>
+          <input type="file" id="ics-import-input" style="display: none;" accept=".ics,text/calendar" onchange="window.app.importIcsFile(event)">
+        </div>` : ''}
       <div class="pixel-card">
         <h4>📅 Agenda · Novo Compromisso</h4>
         <p style="font-size: 14px; color: ${PALETTE.grayDark}; margin-bottom: 10px;">Defina título, horário, esforço, duração estimada e frequência recorrente:</p>
         ${pre ? `
           <div style="background: #e8f8f5; padding: 6px 10px; border: 1px dashed #27ae60; font-size: 13px; margin-bottom: 8px;">
-            🧶 Agendando passo da meta: <strong>${pre.title}</strong>
+            🧶 Agendando passo da meta: <strong>${escHtml(pre.title)}</strong>
           </div>
         ` : ''}
         <div style="display: flex; flex-direction: column; gap: 10px;">
           <div class="flex-row">
             <span style="font-size: 20px;">🧶</span>
-            <input type="text" id="new-task-title" class="pixel-input" placeholder="Título do compromisso: Treino, Reunião, Estudo" value="${initialTitle}">
+            <input type="text" id="new-task-title" class="pixel-input" placeholder="Título do compromisso: Treino, Reunião, Estudo" value="${escHtml(initialTitle)}">
           </div>
           <div class="flex-row">
             <span style="font-size: 20px;">⏰</span>
@@ -4790,7 +4934,7 @@ class AppUI {
               return `
                 <div class="inline-edit-box">
                   <strong>✏️ Editar Compromisso:</strong>
-                  <input type="text" id="edit-occ-title-${o.id}" class="pixel-input" value="${o.title}">
+                  <input type="text" id="edit-occ-title-${o.id}" class="pixel-input" value="${escHtml(o.title)}">
                   <div class="flex-row">
                     <input type="time" id="edit-occ-time-${o.id}" class="pixel-input" value="${o.time}">
                     <select id="edit-occ-effort-${o.id}" class="pixel-input">
@@ -4830,7 +4974,7 @@ class AppUI {
               <div class="mobile-stack-item" style="background: ${isDone ? '#e6f4ea' : '#fff'}; padding: 10px 12px; border: 2px solid ${PALETTE.ink}; font-size: 15px;">
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
                   <div style="flex: 1; min-width: 0;">
-                    <strong style="font-size: 16px; display: block; word-break: break-word;">${o.title}</strong>
+                    <strong style="font-size: 16px; display: block; word-break: break-word;">${escHtml(o.title)}</strong>
                     <span style="font-size: 13px; color: ${PALETTE.grayDark}; display: block; margin-top: 2px;">
                       ⏰ ${o.time} · ⏱️ ${o.estimatedDuration || (o.effort === 'G' ? 60 : (o.effort === 'M' ? 30 : 15))} min · Esforço ${o.effort} (+${o.reward}🐟) · <span style="color: ${PALETTE.cozyPurple}; font-weight: 700;">${rec}</span>
                     </span>
@@ -4919,6 +5063,65 @@ class AppUI {
     this.setCatSpeech(`Compromisso "${title}" adicionado.`);
     this.renderActiveTab();
     this.persist();
+  }
+
+  // Importação de calendário .ics, 100% local. Nada é salvo sem confirmação.
+  triggerImportIcs() {
+    if (NativeFiles.available()) {
+      NativeFiles.pickText()
+        .then(res => this.applyIcsText(res.text))
+        .catch(err => {
+          if (err && err.message === 'cancelled') return;
+          alert('Não consegui abrir esse arquivo. Tente escolher outro.');
+        });
+      return;
+    }
+    const input = document.getElementById('ics-import-input');
+    if (input) input.click();
+  }
+
+  importIcsFile(event) {
+    const input = event && event.target;
+    const file = input && input.files && input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try { this.applyIcsText(String(e.target.result || '')); } finally { if (input) input.value = ''; }
+    };
+    reader.readAsText(file);
+  }
+
+  applyIcsText(text) {
+      try {
+        const horizonDays = 60;
+        const parsed = CatLineIcsImport.importFromIcs(String(text || ''), { fromDayKey: state.dayKey, horizonDays });
+        const conv = CatLineIcsImport.toOccurrences(parsed.items, state.occurrences);
+        const s = parsed.summary;
+        if (s.events === 0) {
+          alert('Não encontrei compromissos nesse arquivo. Confira se ele é um calendário no formato .ics.');
+          return;
+        }
+        if (conv.occurrences.length === 0) {
+          alert(conv.duplicates > 0
+            ? 'Esses compromissos já estão na sua agenda. Nada foi repetido.'
+            : `Não há compromissos com horário nos próximos ${horizonDays} dias.`);
+          return;
+        }
+        let msg = `Encontrei ${conv.occurrences.length} compromissos nos próximos ${horizonDays} dias. Importar para a agenda?`;
+        if (conv.duplicates > 0) msg += `\n${conv.duplicates} já estavam na agenda e serão pulados.`;
+        if (s.skippedAllDay > 0) msg += `\n${s.skippedAllDay} eventos de dia inteiro ficam de fora.`;
+        if (s.truncated) msg += '\nO arquivo é grande, então importei só os primeiros 300.';
+        if (typeof confirm === 'function' && !confirm(msg)) return;
+
+        state.occurrences = state.occurrences.concat(conv.occurrences);
+        audio.playMeowCelebrate();
+        this.setCatSpeech(`Pronto! ${conv.occurrences.length} compromissos chegaram na sua agenda.`);
+        this.renderActiveTab();
+        this.persist();
+      } catch (err) {
+        if (typeof console !== 'undefined' && console.error) console.error('importIcsFile error:', err);
+        alert('Não consegui ler esse arquivo de calendário.');
+      }
   }
 
   // CRUD de Hábitos
@@ -5025,7 +5228,7 @@ class AppUI {
               return `
                 <div class="inline-edit-box">
                   <strong>✏️ Editar Hábito:</strong>
-                  <input type="text" id="edit-habit-title-${h.id}" class="pixel-input" value="${h.title}">
+                  <input type="text" id="edit-habit-title-${h.id}" class="pixel-input" value="${escHtml(h.title)}">
                   <div class="flex-row">
                     <input type="time" id="edit-habit-window-${h.id}" class="pixel-input" value="${h.window}">
                     <select id="edit-habit-freq-${h.id}" class="pixel-input">
@@ -5050,7 +5253,7 @@ class AppUI {
               <div class="mobile-stack-item" style="background: ${h.completed ? '#e6f4ea' : PALETTE.wallCream}; padding: 10px 12px; border: 2px solid ${PALETTE.ink};">
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
                   <div style="flex: 1; min-width: 0;">
-                    <strong style="font-size: 16px; display: block; word-break: break-word;">${h.title}</strong>
+                    <strong style="font-size: 16px; display: block; word-break: break-word;">${escHtml(h.title)}</strong>
                     <span style="font-size: 13px; color: ${PALETTE.grayDark}; display: block; margin-top: 2px;">
                       🔥 Sequência: <strong>${h.streak}d</strong> (Recorde: ${h.bestStreak || h.streak}d) · Até ${h.window} · ${h.frequency || 'Diário'}
                     </span>
@@ -5254,6 +5457,77 @@ class AppUI {
     this.persist();
   }
 
+  // Passos prontos por categoria, 100% offline. Nada entra na meta sem toque da usuária.
+  renderStepSuggestionsHtml(g) {
+    if (typeof CatLineStepTemplates === 'undefined') return '';
+    const sug = state.stepSuggestions;
+    if (!sug || sug.goalId !== g.id) {
+      return `
+        <div style="margin-bottom: 8px;">
+          <button class="pixel-btn btn-sm btn-purple" style="min-height: 44px;" onclick="window.app.suggestStepsForGoal('${g.id}')">💡 Sugerir passos</button>
+        </div>`;
+    }
+    const items = sug.steps.map((s, i) => `
+      <div style="display: flex; align-items: center; gap: 6px; padding: 4px 0;">
+        <span style="flex: 1; font-size: 13px; line-height: 1.3;">${escHtml(s.title)} · ${s.estMinutes} min</span>
+        <button class="pixel-btn btn-sm btn-green" style="min-height: 40px; min-width: 48px;" onclick="window.app.addSuggestedStep('${g.id}', ${i})" aria-label="Adicionar este passo">+</button>
+      </div>`).join('');
+    return `
+      <div class="pixel-card cream" style="margin-bottom: 8px; padding: 8px 10px;">
+        <div style="font-size: 13px; font-weight: 700; margin-bottom: 4px;">💡 Ideias de passos · ${escHtml(sug.label)}</div>
+        ${items || '<div style="font-size: 13px;">Você já tem todos os passos sugeridos!</div>'}
+        <div style="display: flex; gap: 6px; margin-top: 6px;">
+          ${items ? `<button class="pixel-btn btn-sm btn-green" style="min-height: 40px;" onclick="window.app.addAllSuggestedSteps('${g.id}')">Adicionar todos</button>` : ''}
+          <button class="pixel-btn btn-sm btn-secondary" style="min-height: 40px;" onclick="window.app.closeStepSuggestions()">Fechar</button>
+        </div>
+      </div>`;
+  }
+
+  suggestStepsForGoal(goalId) {
+    const goal = state.goals.find(g => g.id === goalId);
+    if (!goal || typeof CatLineStepTemplates === 'undefined') return;
+    const existing = (goal.steps || []).filter(s => !s.archived).map(s => s.title);
+    const result = CatLineStepTemplates.suggestSteps(goal.title, existing);
+    state.stepSuggestions = { goalId, label: result.label, steps: result.steps };
+    audio.playBlip();
+    this.renderTabMetas();
+  }
+
+  _addSuggestedStepNoRender(goal, step) {
+    if (goalStepEngine) goalStepEngine.addStep(goal, { title: step.title, estMinutes: step.estMinutes });
+  }
+
+  addSuggestedStep(goalId, index) {
+    const goal = state.goals.find(g => g.id === goalId);
+    const sug = state.stepSuggestions;
+    if (!goal || !sug || sug.goalId !== goalId || !sug.steps[index]) return;
+    const step = sug.steps[index];
+    this._addSuggestedStepNoRender(goal, step);
+    sug.steps.splice(index, 1);
+    audio.playBlip();
+    this.setCatSpeech(`Passo "${step.title}" adicionado à meta!`);
+    this.renderTabMetas();
+    this.persist();
+  }
+
+  addAllSuggestedSteps(goalId) {
+    const goal = state.goals.find(g => g.id === goalId);
+    const sug = state.stepSuggestions;
+    if (!goal || !sug || sug.goalId !== goalId) return;
+    sug.steps.forEach(s => this._addSuggestedStepNoRender(goal, s));
+    const n = sug.steps.length;
+    state.stepSuggestions = null;
+    audio.playMeowGreeting();
+    this.setCatSpeech(`${n} passos adicionados! Agora é só ir puxando o fio, um de cada vez.`);
+    this.renderTabMetas();
+    this.persist();
+  }
+
+  closeStepSuggestions() {
+    state.stepSuggestions = null;
+    this.renderTabMetas();
+  }
+
   // Gestão de Passos de Metas (v3.2.0 · Prompt 8)
   addStepToGoal(goalId) {
     const goal = state.goals.find(g => g.id === goalId);
@@ -5265,7 +5539,7 @@ class AppUI {
     if (!title) return;
 
     if (goalStepEngine) {
-      goalStepEngine.addStep(goal, title, estMinutes);
+      goalStepEngine.addStep(goal, { title, estMinutes: Number.isFinite(estMinutes) ? estMinutes : null });
     } else {
       if (!goal.steps) goal.steps = [];
       const order = goal.steps.length + 1;
@@ -5334,7 +5608,11 @@ class AppUI {
 
     const newOrder = step.order + delta;
     if (goalStepEngine) {
-      goalStepEngine.reorderStep(goal, stepId, newOrder);
+      const ids = goal.steps.slice().sort((a, b) => a.order - b.order).map(s => s.id);
+      const from = ids.indexOf(stepId);
+      const to = Math.max(0, Math.min(ids.length - 1, from + delta));
+      ids.splice(to, 0, ids.splice(from, 1)[0]);
+      goalStepEngine.reorderSteps(goal, ids);
     } else {
       step.order = Math.max(1, newOrder);
       goal.steps.sort((a, b) => a.order - b.order);
@@ -5356,7 +5634,12 @@ class AppUI {
     const halfEst = step.estMinutes ? Math.max(5, Math.round(step.estMinutes / 2)) : null;
 
     if (goalStepEngine) {
-      goalStepEngine.splitStep(goal, stepId, title1, title2, halfEst, halfEst);
+      goalStepEngine.splitStep(goal, stepId, {
+        firstTitle: title1,
+        secondTitle: title2,
+        firstEstMinutes: halfEst,
+        secondEstMinutes: halfEst
+      });
     } else {
       step.title = title1;
       step.estMinutes = halfEst;
@@ -5406,7 +5689,8 @@ class AppUI {
     const nowIso = Clock.isoString();
 
     if (goalStepEngine) {
-      goalStepEngine.toggleStepDone(goal, stepId, willBeDone ? nowIso : null);
+      if (willBeDone) goalStepEngine.completeStep(goal, stepId);
+      else goalStepEngine.uncompleteStep(goal, stepId);
     } else {
       step.doneAt = willBeDone ? nowIso : null;
     }
@@ -5474,7 +5758,7 @@ class AppUI {
               <option value="VIDA">Vida · 365 dias</option>
             </select>
             <select id="new-goal-color" class="pixel-input">
-              ${YARN_COLORS.map(c => `<option value="${c.id}">Novelo ${c.name}</option>`).join('')}
+              ${YARN_COLORS.map(c => `<option value="${c.id}">Novelo ${escHtml(c.name)}</option>`).join('')}
             </select>
             <div class="flex-row" style="gap: 4px;">
               <input type="number" id="new-goal-days" class="pixel-input" value="7" min="1" max="3650" style="width: 80px;" title="Duração total em dias">
@@ -5509,7 +5793,7 @@ class AppUI {
               return `
                 <div class="inline-edit-box">
                   <strong>✏️ Editar Meta:</strong>
-                  <input type="text" id="edit-goal-title-${g.id}" class="pixel-input" value="${g.title}">
+                  <input type="text" id="edit-goal-title-${g.id}" class="pixel-input" value="${escHtml(g.title)}">
                   <div class="flex-row">
                     <select id="edit-goal-horizon-${g.id}" class="pixel-input" style="width: 155px;" onchange="window.app.updateGoalDaysByHorizon(this.value, 'edit-goal-days-${g.id}')">
                       <option value="SEMANA" ${g.horizon === 'SEMANA' ? 'selected' : ''}>Semana · 7 dias</option>
@@ -5518,7 +5802,7 @@ class AppUI {
                       <option value="VIDA" ${g.horizon === 'VIDA' ? 'selected' : ''}>Vida · 365 dias</option>
                     </select>
                     <select id="edit-goal-color-${g.id}" class="pixel-input">
-                      ${YARN_COLORS.map(c => `<option value="${c.id}" ${c.id === g.yarnColorId ? 'selected' : ''}>Novelo ${c.name}</option>`).join('')}
+                      ${YARN_COLORS.map(c => `<option value="${c.id}" ${c.id === g.yarnColorId ? 'selected' : ''}>Novelo ${escHtml(c.name)}</option>`).join('')}
                     </select>
                     <div class="flex-row" style="gap: 4px;">
                       <input type="number" id="edit-goal-days-${g.id}" class="pixel-input" value="${currentDays}" style="width: 80px;" title="Duração total em dias">
@@ -5543,8 +5827,8 @@ class AppUI {
                   <div style="display: flex; align-items: flex-start; gap: 8px;">
                     <canvas class="yarn-color-dot mini-yarn-canvas" width="22" height="22" data-color="${g.yarnColorId}" style="flex-shrink: 0; margin-top: 2px;"></canvas>
                     <div style="flex: 1; min-width: 0;">
-                      <strong style="font-size: 16px; display: block; word-break: break-word;">${g.horizon} · ${g.title} (${currentDays}d)</strong>
-                      <span style="font-size: 13px; color: ${pal.shadow}; font-weight: 700;">Novelo ${pal.name} · ⏳ <span id="goal-timer-${g.id}">${formatRemainingTime(g.remainingSeconds)}</span></span>
+                      <strong style="font-size: 16px; display: block; word-break: break-word;">${g.horizon} · ${escHtml(g.title)} (${currentDays}d)</strong>
+                      <span style="font-size: 13px; color: ${pal.shadow}; font-weight: 700;">Novelo ${escHtml(pal.name)} · ⏳ <span id="goal-timer-${g.id}">${formatRemainingTime(g.remainingSeconds)}</span></span>
                     </div>
                   </div>
                   <div class="card-action-footer">
@@ -5582,7 +5866,7 @@ class AppUI {
                       if (isEditing) {
                         return `
                           <div style="display: flex; gap: 4px; align-items: center; background: #fff; padding: 6px; border: 1px solid ${PALETTE.ink};">
-                            <input type="text" id="edit-step-title-${step.id}" class="pixel-input" value="${step.title}" style="flex: 1;">
+                            <input type="text" id="edit-step-title-${step.id}" class="pixel-input" value="${escHtml(step.title)}" style="flex: 1;">
                             <input type="number" id="edit-step-est-${step.id}" class="pixel-input" value="${step.estMinutes || ''}" placeholder="Min" style="width: 60px;">
                             <button class="pixel-btn btn-sm btn-green" style="min-width: 48px; min-height: 48px;" onclick="window.app.saveEditStep('${g.id}', '${step.id}')">Salvar</button>
                             <button class="pixel-btn btn-sm btn-secondary" style="min-width: 48px; min-height: 48px;" onclick="window.app.cancelEditStep()">✕</button>
@@ -5597,7 +5881,7 @@ class AppUI {
                               ${isDone ? '✓' : '○'}
                             </button>
                             <div style="display: flex; flex-direction: column; min-width: 0;">
-                              <span style="font-size: 14px; font-weight: 600; text-decoration: ${isDone ? 'line-through' : 'none'}; color: ${isDone ? '#27ae60' : PALETTE.ink}; word-break: break-word;">${step.title}</span>
+                              <span style="font-size: 14px; font-weight: 600; text-decoration: ${isDone ? 'line-through' : 'none'}; color: ${isDone ? '#27ae60' : PALETTE.ink}; word-break: break-word;">${escHtml(step.title)}</span>
                               ${step.estMinutes ? `<span style="font-size: 12px; color: ${PALETTE.grayDark}; font-weight: 700;">⏱️ ${step.estMinutes} min</span>` : ''}
                             </div>
                           </div>
@@ -5613,6 +5897,8 @@ class AppUI {
                       `;
                     }).join('')}
                   </div>
+
+                  ${this.renderStepSuggestionsHtml(g)}
 
                   <!-- Form para Adicionar Passo -->
                   <div style="display: flex; gap: 6px; align-items: center;">
@@ -5670,25 +5956,49 @@ class AppUI {
       rewardEvents: state.rewardEvents || [],
       dayClosures: state.dayClosures || [],
       weeklyLogs: state.weeklyLogs || [],
+      moodLog: state.moodLog || [],
       habits: state.habits
     };
 
-    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+    const json = JSON.stringify(backupData, null, 2);
+    const fileName = `catline_backup_${state.dayKey}.json`;
+    const finish = () => {
+      audio.playMeowCelebrate();
+      this.spawnPixelConfetti();
+      alert("Backup JSON completo exportado com sucesso! Todos os seus mimos, hábitos, metas e compromissos estão salvos.");
+    };
+
+    // No APK, o WebView não baixa Blob: o seletor nativo do Android grava o arquivo.
+    if (NativeFiles.available()) {
+      NativeFiles.saveText(fileName, 'application/json', json).then(finish).catch(err => {
+        if (err && err.message === 'cancelled') return;
+        alert('Não consegui salvar o backup. Tente escolher outra pasta.');
+      });
+      return;
+    }
+
+    const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `catline_backup_${state.dayKey}.json`;
+    a.download = fileName;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-
-    audio.playMeowCelebrate();
-    this.spawnPixelConfetti();
-    alert("Backup JSON completo exportado com sucesso! Todos os seus mimos, hábitos, metas e compromissos estão salvos.");
+    finish();
   }
 
   triggerImportBackup() {
+    if (NativeFiles.available()) {
+      NativeFiles.pickText()
+        .then(res => this.applyBackupText(res.text))
+        .catch(err => {
+          if (err && err.message === 'cancelled') return;
+          alert('Não consegui abrir esse arquivo. Tente escolher outro.');
+        });
+      return;
+    }
     const input = document.getElementById('json-backup-input');
     if (input) input.click();
   }
@@ -5697,9 +6007,12 @@ class AppUI {
     const file = event.target.files && event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = (e) => this.applyBackupText(e.target.result);
+    reader.readAsText(file);
+  }
+
+  applyBackupText(raw) {
       try {
-        const raw = e.target.result;
         const engine = (typeof backupEngine !== 'undefined' && backupEngine)
           ? backupEngine
           : (typeof CatLineBackupEngine !== 'undefined' ? (CatLineBackupEngine.backupEngine || CatLineBackupEngine) : null);
@@ -5740,8 +6053,6 @@ class AppUI {
         if (typeof console !== 'undefined' && console.error) console.error('importJsonBackup error:', err);
         alert("Erro ao ler arquivo de backup JSON.");
       }
-    };
-    reader.readAsText(file);
   }
 
   renderTabInsights() {
@@ -5821,7 +6132,7 @@ class AppUI {
         <div class="heatmap-list">
           ${state.analyticsData.periodsOfDay.map(p => `
             <div class="heatmap-row">
-              <span class="heatmap-label">${p.name.split(' ')[0]}</span>
+              <span class="heatmap-label">${escHtml(p.name.split(' ')[0])}</span>
               <div class="heatmap-track">
                 <div class="heatmap-fill" style="width: ${p.pct}%; background: ${p.color};"></div>
               </div>
@@ -5982,7 +6293,7 @@ class AppUI {
           <div style="font-size: 36px; margin: 4px 0;">🎉 ${state.celebratingReward.icon} ✨</div>
           <h4 style="color: #1b5e20; margin-bottom: 4px;">PARABÉNS! VOCÊ SE PRESENTEOU!</h4>
           <p style="font-size: 16px; font-weight: 700; color: ${PALETTE.ink}; margin: 4px 0;">
-            "${state.celebratingReward.title}"
+            "${escHtml(state.celebratingReward.title)}"
           </p>
           <p style="font-size: 13px; color: ${PALETTE.grayDark}; margin-bottom: 10px; line-height: 1.4;">
             Você se dedicou aos seus hábitos e metas. Vá desfrutar do seu momento sem culpa! A gatinha está cheia de orgulho! 🐱💕
@@ -6027,7 +6338,7 @@ class AppUI {
                   <strong style="font-size: 13px; color: ${PALETTE.orange};">✏️ Editando Mimo:</strong>
                   <div>
                     <label style="font-size: 12px; font-weight: 700; color: ${PALETTE.ink};">Nome do mimo ou momento:</label>
-                    <input type="text" id="edit-rw-title-${rw.id}" value="${rw.title.replace(/"/g, '&quot;')}" style="width: 100%; box-sizing: border-box; padding: 7px 9px; border: 2px solid ${PALETTE.ink}; font-family: var(--font-body); font-size: 14px; margin-top: 3px;">
+                    <input type="text" id="edit-rw-title-${rw.id}" value="${escHtml(rw.title)}" style="width: 100%; box-sizing: border-box; padding: 7px 9px; border: 2px solid ${PALETTE.ink}; font-family: var(--font-body); font-size: 14px; margin-top: 3px;">
                   </div>
                   <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
                     <div>
@@ -6060,7 +6371,7 @@ class AppUI {
                 <div style="display: flex; align-items: flex-start; gap: 10px; width: 100%;">
                   <span style="font-size: 26px; flex-shrink: 0; background: ${PALETTE.wallCream}; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; border: 2px solid ${PALETTE.ink}; border-radius: 6px;">${rw.icon}</span>
                   <div style="flex: 1; min-width: 0;">
-                    <strong style="font-size: 15px; color: ${PALETTE.ink}; display: block; line-height: 1.3; word-break: break-word;">${rw.title}</strong>
+                    <strong style="font-size: 15px; color: ${PALETTE.ink}; display: block; line-height: 1.3; word-break: break-word;">${escHtml(rw.title)}</strong>
                     <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 4px;">
                       <span class="pixel-badge" style="background: #fff3e0; color: ${PALETTE.orangeShadow}; font-weight: 700; font-size: 12px; padding: 2px 6px; border: 1px solid ${PALETTE.orange}; border-radius: 3px;">
                         🐟 ${rw.cost} Peixinhos
@@ -6157,8 +6468,8 @@ class AppUI {
                 <div style="display: flex; align-items: center; gap: 10px; width: 100%;">
                   <span style="font-size: 24px; width: 38px; height: 38px; display: flex; align-items: center; justify-content: center; background: #fff; border: 2px solid ${PALETTE.ink}; border-radius: 6px; flex-shrink: 0;">${item.icon}</span>
                   <div style="flex: 1; min-width: 0;">
-                    <strong style="font-size: 15px; display: block;">${item.name}</strong>
-                    <span style="font-size: 12px; color: ${PALETTE.grayDark}; display: block;">${item.desc}</span>
+                    <strong style="font-size: 15px; display: block;">${escHtml(item.name)}</strong>
+                    <span style="font-size: 12px; color: ${PALETTE.grayDark}; display: block;">${escHtml(item.desc)}</span>
                   </div>
                 </div>
                 <div class="card-action-footer">
@@ -6519,7 +6830,7 @@ class AppUI {
         <div style="max-height: 170px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 8px; background: #fff8f0; border: 2px solid ${PALETTE.ink}; margin-bottom: 10px;">
           ${state.messages.map(m => `
             <div style="font-size: 15px; line-height: 1.4; align-self: ${m.fromUser ? 'flex-end' : 'flex-start'}; background: ${m.fromUser ? PALETTE.orange : '#fff'}; color: ${m.fromUser ? '#fff' : PALETTE.ink}; padding: 8px 12px; border-radius: 4px; border: 2px solid ${PALETTE.ink}; max-width: 88%;">
-              ${m.text}
+              ${escHtml(m.text)}
             </div>
           `).join('')}
         </div>
@@ -6631,7 +6942,7 @@ class AppUI {
                     style="${isLocked ? 'background:#5A4E7C; color:#fff; border-color:#181425; font-weight:700;' : (isUnlockedPass ? 'background:#e8f5e9; color:#1b5e20; border-color:#2e7d32;' : '')}"
                     onclick="window.app.quickToggleLockPreset('${p.id}')">
                     <span>${p.icon}</span>
-                    <span>${p.name}</span>
+                    <span>${escHtml(p.name)}</span>
                     <span>${isLocked ? '🔒' : (isUnlockedPass ? '🔓' : '＋')}</span>
                   </button>
                 `;
@@ -6668,7 +6979,7 @@ class AppUI {
                         <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
                           <span style="font-size: 24px; flex-shrink: 0;">${r.icon || '📱'}</span>
                           <div style="min-width: 0;">
-                            <strong style="font-size: 15px; display: block; color: ${PALETTE.ink};">${r.name}</strong>
+                            <strong style="font-size: 15px; display: block; color: ${PALETTE.ink};">${escHtml(r.name)}</strong>
                             <span style="font-size: 11px; color: ${PALETTE.grayDark};">
                               ${isPaused
                                 ? '⏸️ Trava pausada'
@@ -6687,7 +6998,7 @@ class AppUI {
                       <div class="card-action-footer" style="flex-wrap: wrap;">
                         ${isLockedNow ? `
                           <button class="pixel-btn btn-sm btn-purple" style="flex: 1;" onclick="window.app.simulateOpenSocialApp('${r.id}')">
-                            🔒 Abrir ${r.name}
+                            🔒 Abrir ${escHtml(r.name)}
                           </button>
                           <button class="pixel-btn btn-sm btn-gold" style="flex: 1;" onclick="window.app.redeemAppUnlockPass('${r.id}', 15, 15)" title="Usar 15 Peixinhos para liberar por 15 min">
                             🎁 Liberar 15m (15🐟)
@@ -6699,7 +7010,7 @@ class AppUI {
                           ` : ''}
                         ` : `
                           <button class="pixel-btn btn-sm btn-green" style="flex: 1;" onclick="window.app.launchUnlockedSocialApp('${r.id}')">
-                            🚀 Entrar no ${r.name}
+                            🚀 Entrar no ${escHtml(r.name)}
                           </button>
                           <button class="pixel-btn btn-sm btn-red" style="flex: 1;" onclick="window.app.relockAppNow('${r.id}')">
                             🔒 Trancar Agora
@@ -6924,7 +7235,7 @@ class AppUI {
     if (rigor === 0) {
       innerBoxHtml = `
         <div class="blocker-modal-header">
-          <span style="font-weight: 700; font-size: 16px;">${r.icon || '📱'} ${r.name} · Modo Observar</span>
+          <span style="font-weight: 700; font-size: 16px;">${r.icon || '📱'} ${escHtml(r.name)} · Modo Observar</span>
           <button class="pixel-btn btn-sm btn-icon" onclick="window.app.closeSimulatedModal()">✕</button>
         </div>
         <div class="blocker-cat-banner">
@@ -6940,13 +7251,13 @@ class AppUI {
       const pct = Math.round(((15 - sec) / 15) * 100);
       innerBoxHtml = `
         <div class="blocker-modal-header">
-          <span style="font-weight: 700; font-size: 16px;">${r.icon || '📱'} ${r.name} · Pausa Reflexiva</span>
+          <span style="font-weight: 700; font-size: 16px;">${r.icon || '📱'} ${escHtml(r.name)} · Pausa Reflexiva</span>
           <button class="pixel-btn btn-sm btn-icon" onclick="window.app.closeSimulatedModal()">✕</button>
         </div>
         <div class="blocker-cat-banner">
           <span class="blocker-cat-avatar">🧶</span>
           <div class="blocker-dialog-text">
-            Espere ${sec} segundos... O que você veio buscar no ${r.name} ajuda a puxar o fio das suas metas hoje?
+            Espere ${sec} segundos... O que você veio buscar no ${escHtml(r.name)} ajuda a puxar o fio das suas metas hoje?
           </div>
         </div>
         <div class="friction-timer-track">
@@ -6960,14 +7271,14 @@ class AppUI {
     } else {
       innerBoxHtml = `
         <div class="blocker-modal-header">
-          <span style="font-weight: 700; font-size: 16px;">🔒 ${r.icon || '📱'} ${r.name} Trancado!</span>
+          <span style="font-weight: 700; font-size: 16px;">🔒 ${r.icon || '📱'} ${escHtml(r.name)} Trancado!</span>
           <button class="pixel-btn btn-sm btn-icon" onclick="window.app.closeSimulatedModal()">✕</button>
         </div>
 
         <div class="blocker-cat-banner">
           <span class="blocker-cat-avatar">🐱</span>
           <div class="blocker-dialog-text" style="font-size: 13.5px;">
-            O <strong>${r.name}</strong> está trancado! Para destravar como recompensa, cumpra suas tarefas abaixo ou troque seus <strong>Peixinhos (Saldo: ${state.currencies.peixinhos}🐟)</strong>:
+            O <strong>${escHtml(r.name)}</strong> está trancado! Para destravar como recompensa, cumpra suas tarefas abaixo ou troque seus <strong>Peixinhos (Saldo: ${state.currencies.peixinhos}🐟)</strong>:
           </div>
         </div>
 
@@ -7006,7 +7317,7 @@ class AppUI {
               : `
                 ${pendingTasks.map(t => `
                   <div class="pending-task-blocker-row">
-                    <span style="font-size: 13px;">📅 <strong>${t.title}</strong> (${t.time})</span>
+                    <span style="font-size: 13px;">📅 <strong>${escHtml(t.title)}</strong> (${t.time})</span>
                     <button class="pixel-btn btn-sm btn-green" onclick="window.app.completeOccurrenceFromBlocker('${t.id}')">
                       ✓ Cumprir (+${t.reward}🐟)
                     </button>
@@ -7014,7 +7325,7 @@ class AppUI {
                 `).join('')}
                 ${pendingHabits.map(h => `
                   <div class="pending-task-blocker-row">
-                    <span style="font-size: 13px;">🔄 <strong>${h.title}</strong></span>
+                    <span style="font-size: 13px;">🔄 <strong>${escHtml(h.title)}</strong></span>
                     <button class="pixel-btn btn-sm btn-green" onclick="window.app.completeHabitFromBlocker('${h.id}')">
                       ✓ Cumprir (+8🐟)
                     </button>
@@ -7108,33 +7419,75 @@ class AppUI {
     syncNativeBlocker();
     try { diag = JSON.parse(nb.diagnostics() || '{}'); } catch (e) {}
     const enabled = !!diag.serviceEnabled;
+    const needsRestrictedStep = Number(diag.sdk) >= 33;
+    const canSelf = !!diag.canSelfEnable;
+    // Modo avançado: com a permissão dada por ADB o app liga o próprio serviço e pode religar se o Android desligar.
+    const autoHtml = (enabled && canSelf) ? `
+        <label style="display: flex; align-items: flex-start; gap: 8px; font-size: 12px; line-height: 1.35; margin: 6px 0; cursor: pointer;">
+          <input type="checkbox" ${diag.autoEnable ? 'checked' : ''} onchange="window.app.toggleBlockerAutoEnable(this.checked)" style="margin-top: 2px;">
+          <span>Religar o bloqueio sozinho se o Android desligar. Para desativar de vez, desmarque esta opção antes de desligar o serviço nas configurações.</span>
+        </label>` : '';
+    const advancedHtml = enabled ? '' : (canSelf ? `
+        <div style="margin: 8px 0; padding: 8px 10px; border: 2px solid ${PALETTE.leafGreen}; background: #eefaf0; font-size: 13px; line-height: 1.4;">
+          ⚡ Este celular já deu a permissão avançada. O Cat Line liga o serviço sozinho, sem passar pelas configurações restritas.
+          <div style="margin-top: 6px;"><button class="pixel-btn btn-sm btn-green" onclick="window.app.blockerSelfEnable()">⚡ Ligar agora</button></div>
+        </div>` : `
+        <details style="margin-top: 8px; font-size: 12px; line-height: 1.4;">
+          <summary style="cursor: pointer; font-weight: 700;">⚡ Modo avançado: ligar pelo computador</summary>
+          <p style="margin: 6px 0;">Pula as configurações restritas e deixa o Cat Line religar o bloqueio se o Android o desligar. Precisa de um computador com o ADB, uma única vez.</p>
+          <ol style="padding-left: 18px; margin: 4px 0;">
+            <li>No celular, abra Configurações, Sobre o telefone, e toque 7 vezes em Número da versão para liberar as Opções do desenvolvedor.</li>
+            <li>Nas Opções do desenvolvedor, ligue a Depuração USB. No Xiaomi, ligue também a depuração USB com configurações de segurança.</li>
+            <li>Conecte o cabo ao computador e autorize a depuração no celular.</li>
+            <li>No computador, rode este comando:
+              <code style="display: block; margin: 4px 0; padding: 6px; background: #181425; color: #FFF3B0; word-break: break-all; user-select: all;">adb shell pm grant com.catline.app android.permission.WRITE_SECURE_SETTINGS</code>
+            </li>
+            <li>Volte para cá e toque em Atualizar no diagnóstico. O botão Ligar agora aparece.</li>
+          </ol>
+          <p style="margin: 6px 0;">Essa permissão é poderosa. O Cat Line só a usa para ligar o próprio serviço de bloqueio e nunca mexe nos serviços de outros apps. Depois você pode desligar a Depuração USB.</p>
+        </details>`);
     const fmt = (ms) => ms ? Clock.formatTime(ms) : 'nunca';
     const rulesHtml = (diag.rules || []).map(r => {
       const color = r.status === 'TRAVA AGORA' ? PALETTE.leafGreen : PALETTE.grayDark;
       const inst = r.installed ? '' : ' · <em>não instalado</em>';
-      return `<li><strong>${r.name}</strong>: <span style="color:${color}">${r.status}</span>${inst}</li>`;
+      return `<li><strong>${escHtml(r.name)}</strong>: <span style="color:${color}">${escHtml(r.status)}</span>${inst}</li>`;
     }).join('');
     const lastBlock = diag.lastBlock ? diag.lastBlock.split('@') : null;
     const diagHtml = `
         <details style="margin-top: 8px; font-size: 12px;">
           <summary style="cursor:pointer; font-weight:700;">🔎 Diagnóstico do Bloqueador no Celular</summary>
           <ul style="padding-left: 16px; margin-top: 4px;">
-            <li>Versão: ${diag.version || '?'} · Android SDK ${diag.sdk || '?'} · ${diag.device || ''}</li>
+            <li>Versão: ${escHtml(diag.version || '?')} · Android SDK ${escHtml(diag.sdk || '?')} · ${escHtml(diag.device || '')}</li>
             <li>Serviço ligado nas configurações: <strong>${enabled ? 'sim' : 'não'}</strong></li>
             <li>Serviço conectado pela última vez: ${fmt(diag.connectedAt)}</li>
-            <li>Último app detectado: ${diag.lastPkg || 'nenhum'} · ${fmt(diag.lastAt)}</li>
-            <li>Último bloqueio: ${lastBlock ? lastBlock[0] + ' · ' + fmt(Number(lastBlock[1])) : 'nenhum'}</li>
+            <li>Último app detectado: ${escHtml(diag.lastPkg || 'nenhum')} · ${fmt(diag.lastAt)}</li>
+            <li>Último bloqueio: ${lastBlock ? escHtml(lastBlock[0]) + ' · ' + fmt(Number(lastBlock[1])) : 'nenhum'}</li>
             <li>Regras sincronizadas: ${fmt(diag.syncAt)}</li>
           </ul>
           <ul style="padding-left: 16px;">${rulesHtml || '<li>Nenhuma regra</li>'}</ul>
           <button class="pixel-btn btn-sm" style="margin-top:4px;" onclick="window.app.refreshBlockerDiag()">🔄 Atualizar</button>
         </details>`;
-    const testBtn = IS_RELEASE ? '' : `<button class="pixel-btn btn-sm" onclick="window.app.testBlockScreen()">🧪 Testar tela de bloqueio</button>`;
+    // O teste existe também no APK de release: é ele que mostra à usuária que o bloqueio está funcionando.
+    const testBtn = `<button class="pixel-btn btn-sm btn-purple" onclick="window.app.testBlockScreen()">👀 Ver como a gatinha bloqueia</button>`;
+
+    // Em alguns celulares o Android pausa serviços para economizar bateria e o bloqueio para de funcionar sem aviso.
+    let batteryWarn = '';
+    const ns = this.getNotifStatus();
+    if (enabled && ns && !ns.batteryUnrestricted) {
+      batteryWarn = `
+        <div style="margin: 6px 0; padding: 6px 8px; border: 2px dashed #E0A800; background: #fff8e1; font-size: 12px; line-height: 1.35;">
+          ⚠️ O Android pode pausar o bloqueio para economizar bateria. ${escHtml(this.batteryHint(ns.manufacturer))}
+          <div style="margin-top: 4px;"><button class="pixel-btn btn-sm btn-purple" style="min-height: 36px;" onclick="window.app.notifFixBattery()">Liberar bateria</button></div>
+        </div>`;
+    }
+
     if (enabled) {
       return `
       <div class="pixel-card" style="border-left: 6px solid ${PALETTE.leafGreen};">
         <h4 style="margin-bottom: 4px;">✅ Bloqueio Nativo Android Ativo</h4>
         <p style="font-size: 13px; margin-bottom: 6px;">As redes com status <strong>TRAVA AGORA</strong> serão bloqueadas automaticamente ao tentar abri-las no celular.</p>
+        ${batteryWarn}
+        ${autoHtml}
         <div class="flex-row" style="gap: 6px; flex-wrap: wrap; margin-bottom: 6px;">
           <button class="pixel-btn btn-sm btn-red" onclick="window.app.relockAllAppsNow()">🔒 Trancar Todas as Redes Agora</button>
           ${testBtn}
@@ -7142,20 +7495,47 @@ class AppUI {
         ${diagHtml}
       </div>`;
     }
+    const restrictedStep = needsRestrictedStep ? `
+          <li>Se o Android avisar <strong>Configuração restrita</strong>, toque em OK e volte. Depois toque em <strong>Info do app</strong>, em ⋮ no canto de cima e em <strong>Permitir configurações restritas</strong>. Esse item só aparece depois da tentativa do passo 1.</li>` : '';
     return `
       <div class="pixel-card" style="border-left: 6px solid #E06C75;">
         <h4 style="margin-bottom: 4px;">⚠️ Ative a Permissão de Bloqueio no Android</h4>
-        <p style="font-size: 13px; margin-bottom: 6px;">Para o celular cobrir o Instagram/TikTok fora do Cat Line, ligue o serviço em 2 passos:</p>
-        <ol style="font-size: 13px; padding-left: 18px; margin-bottom: 8px;">
-          <li>Toque em <strong>Ativar bloqueio</strong>, abra <strong>Apps instalados</strong> ou <strong>Serviços baixados</strong> e escolha <strong>Cat Line</strong>.</li>
-          <li>Ligue a chave. Se aparecer <strong>Configuração restrita</strong>, toque em <strong>Info do app</strong>, depois em ⋮ no canto superior e em <strong>Permitir configurações restritas</strong>. Depois repita o passo 1.</li>
+        <p style="font-size: 13px; margin-bottom: 6px;">Para o celular cobrir o Instagram e o TikTok fora do Cat Line, ligue o serviço em ${needsRestrictedStep ? '3' : '2'} passos. O Cat Line usa essa permissão só para saber qual app está aberto. Nenhum conteúdo sai do celular.</p>
+        <ol style="font-size: 13px; padding-left: 18px; margin-bottom: 8px; line-height: 1.4;">
+          <li>Toque em <strong>Ligar o serviço</strong>, abra <strong>Apps instalados</strong> ou <strong>Serviços baixados</strong>, escolha <strong>Cat Line</strong> e ligue a chave.</li>${restrictedStep}
+          <li>Repita o passo 1. Quando a chave ficar ligada, volte para cá. Esta tela se atualiza sozinha.</li>
         </ol>
         <div class="flex-row" style="gap: 6px; flex-wrap: wrap;">
-          <button class="pixel-btn btn-sm btn-green" onclick="window.app.openBlockerSettings()">Ativar bloqueio</button>
-          <button class="pixel-btn btn-sm" onclick="window.app.openBlockerAppInfo()">Info do app</button>
+          <button class="pixel-btn btn-sm btn-green" onclick="window.app.openBlockerSettings()">Ligar o serviço</button>
+          ${needsRestrictedStep ? '<button class="pixel-btn btn-sm" onclick="window.app.openBlockerAppInfo()">Info do app</button>' : ''}
+          ${testBtn}
         </div>
+        ${advancedHtml}
         ${diagHtml}
       </div>`;
+  }
+
+  blockerSelfEnable() {
+    let res = 'error';
+    try { res = window.AndroidBlocker.selfEnableService(); } catch (e) {}
+    const msg = {
+      ok: 'Ligado! O bloqueio já está valendo.',
+      already: 'O bloqueio já estava ligado.',
+      no_permission: 'Falta a permissão avançada. Siga o modo avançado para liberar.',
+      error: 'Não consegui ligar agora. Tente pelo passo a passo.'
+    }[res] || 'Não consegui ligar agora. Tente pelo passo a passo.';
+    this.setCatSpeech(msg);
+    this.renderActiveTab();
+    // O Android leva um instante para registrar o serviço
+    setTimeout(() => { if (state.activeTab === 'foco' || state.activeTab === 'mais') this.renderActiveTab(); }, 1200);
+  }
+
+  toggleBlockerAutoEnable(checked) {
+    try { window.AndroidBlocker.setAutoEnable(!!checked); } catch (e) {}
+    this.setCatSpeech(checked
+      ? 'Combinado! Se o Android desligar o bloqueio, eu ligo de novo quando você abrir o app.'
+      : 'Tudo bem. Não vou religar o bloqueio sozinha.');
+    this.renderActiveTab();
   }
 
   refreshBlockerDiag() {
@@ -7275,14 +7655,14 @@ class AppUI {
           ${SOCIAL_MEDIA_PRESETS.map(p => `
             <button type="button" class="preset-chip-btn ${state.selectedPresetId === p.id ? 'active' : ''}" onclick="window.app.selectSocialPreset('${p.id}')">
               <span>${p.icon}</span>
-              <span>${p.name}</span>
+              <span>${escHtml(p.name)}</span>
             </button>
           `).join('')}
         </div>
 
         <div style="display: flex; flex-direction: column; gap: 10px;">
           <div class="flex-row">
-            <input type="text" id="foco-app-name" class="pixel-input" placeholder="Nome do App · TikTok, Netflix, Jogo" value="${selPreset.name}" style="flex: 1;" oninput="window.app.onFocoAppNameInput(this.value)">
+            <input type="text" id="foco-app-name" class="pixel-input" placeholder="Nome do App · TikTok, Netflix, Jogo" value="${escHtml(selPreset.name)}" style="flex: 1;" oninput="window.app.onFocoAppNameInput(this.value)">
             <input type="text" id="foco-pkg-name" class="pixel-input" placeholder="Pacote automático" value="${selPreset.pkg}" style="flex: 1;">
           </div>
 
@@ -7896,9 +8276,9 @@ class AppUI {
               return presets.map(h => {
                 const isSel = b.selectedHabits.includes(h.name);
                 return `
-                  <div class="briefing-choice-card ${isSel ? 'selected' : ''}" onclick="window.app.toggleBriefingHabit('${h.name}')">
+                  <div class="briefing-choice-card ${isSel ? 'selected' : ''}" onclick="window.app.toggleBriefingHabit('${escHtml(h.name)}')">
                     <span>${h.icon}</span>
-                    <span style="flex: 1;">${h.name}</span>
+                    <span style="flex: 1;">${escHtml(h.name)}</span>
                     ${isSel ? '<span style="color: ' + PALETTE.leafGreen + ';">✓</span>' : ''}
                   </div>
                 `;
@@ -7930,7 +8310,7 @@ class AppUI {
         <div class="pixel-card">
           <h4>🎯 Meta & Cronômetro em Dias</h4>
           <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px;">
-            <input type="text" id="briefing-goal-title" class="pixel-input" value="${b.goalTitle}" placeholder="Título da sua grande meta">
+            <input type="text" id="briefing-goal-title" class="pixel-input" value="${escHtml(b.goalTitle)}" placeholder="Título da sua grande meta">
 
             <div>
               <span style="font-size: 13px; font-weight: 700;">Duração em dias:</span>
@@ -7955,7 +8335,7 @@ class AppUI {
                   return `
                     <div class="briefing-choice-card ${isSel ? 'selected' : ''}" onclick="window.app.selectBriefingGoalColor('${c.id}')">
                       <canvas class="yarn-color-dot mini-yarn-canvas" width="22" height="22" data-color="${c.id}"></canvas>
-                      <span style="flex: 1;">${c.name}</span>
+                      <span style="flex: 1;">${escHtml(c.name)}</span>
                       ${isSel ? '<span style="color: ' + PALETTE.leafGreen + ';">✓</span>' : ''}
                     </div>
                   `;
@@ -7965,7 +8345,7 @@ class AppUI {
 
             <div>
               <span style="font-size: 13px; font-weight: 700;">Mimo especial ao cumprir:</span>
-              <input type="text" id="briefing-goal-reward" class="pixel-input" value="${b.goalReward}" placeholder="Ex: Jantar delicioso, dia de descanso...">
+              <input type="text" id="briefing-goal-reward" class="pixel-input" value="${escHtml(b.goalReward)}" placeholder="Ex: Jantar delicioso, dia de descanso...">
             </div>
           </div>
         </div>
@@ -7993,9 +8373,9 @@ class AppUI {
             ${APP_PRESETS.map(a => {
               const isSel = b.selectedApps.includes(a.name);
               return `
-                <div class="briefing-choice-card ${isSel ? 'selected' : ''}" onclick="window.app.toggleBriefingApp('${a.name}')">
+                <div class="briefing-choice-card ${isSel ? 'selected' : ''}" onclick="window.app.toggleBriefingApp('${escHtml(a.name)}')">
                   <span>${a.icon}</span>
-                  <span style="flex: 1;">${a.name}</span>
+                  <span style="flex: 1;">${escHtml(a.name)}</span>
                   ${isSel ? '<span style="color: ' + PALETTE.leafGreen + ';">✓</span>' : ''}
                 </div>
               `;
@@ -8057,15 +8437,15 @@ class AppUI {
             <div class="briefing-summary-item">
               <span class="briefing-summary-label">GRANDE META COM NOVELO</span>
               <span class="briefing-summary-val">
-                ${b.goalHorizon} · ${b.goalTitle} · ${b.goalDays} dias de prazo<br>
-                Novelo ${goalPalette.name} na patinha · Mimo: ${b.goalReward}
+                ${b.goalHorizon} · ${escHtml(b.goalTitle)} · ${b.goalDays} dias de prazo<br>
+                Novelo ${escHtml(goalPalette.name)} na patinha · Mimo: ${escHtml(b.goalReward)}
               </span>
             </div>
 
             <div class="briefing-summary-item">
               <span class="briefing-summary-label">FOCO & REDES SOCIAIS</span>
               <span class="briefing-summary-val">
-                ${b.selectedApps.join(', ') || 'Nenhuma'} · ${rigorObj.name}<br>
+                ${b.selectedApps.join(', ') || 'Nenhuma'} · ${escHtml(rigorObj.name)}<br>
                 Janela: ${b.windowStart} às ${b.windowEnd}
               </span>
             </div>
@@ -8162,7 +8542,7 @@ class AppUI {
         return `
           <div class="inline-edit-box">
             <strong>✏️ Editar Compromisso:</strong>
-            <input type="text" id="edit-occ-title-${o.id}" class="pixel-input" value="${o.title}">
+            <input type="text" id="edit-occ-title-${o.id}" class="pixel-input" value="${escHtml(o.title)}">
             <div class="flex-row">
               <input type="time" id="edit-occ-time-${o.id}" class="pixel-input" value="${o.time}">
               <select id="edit-occ-effort-${o.id}" class="pixel-input">
@@ -8194,7 +8574,7 @@ class AppUI {
         return `
           <div class="inline-edit-box">
             <strong>✏️ Editar Hábito:</strong>
-            <input type="text" id="edit-habit-title-${h.id}" class="pixel-input" value="${h.title}">
+            <input type="text" id="edit-habit-title-${h.id}" class="pixel-input" value="${escHtml(h.title)}">
             <div class="flex-row">
               <input type="time" id="edit-habit-window-${h.id}" class="pixel-input" value="${h.window}">
               <select id="edit-habit-freq-${h.id}" class="pixel-input">
@@ -8252,7 +8632,7 @@ class AppUI {
         const secondRunBtn = (maxRuns === 2 && (o.completedRuns || 0) === 1 && item.done)
           ? ` <button class="pixel-btn btn-sm btn-gold" onclick="event.stopPropagation(); window.app.reopenSecondRun('${o.id}')">Fazer 2ª vez</button>`
           : '';
-        const noteLine = o.notes ? `<div style="font-size:12px;color:${PALETTE.grayDark};margin-top:2px;">📝 ${o.notes}</div>` : '';
+        const noteLine = o.notes ? `<div style="font-size:12px;color:${PALETTE.grayDark};margin-top:2px;">📝 ${escHtml(o.notes)}</div>` : '';
         stateBadge = `<span class="state-pill state-pill-${normSt}">${stLabel}</span>${runBadge}${conflictBadge}${secondRunBtn}${noteLine}`;
 
         if (normSt === 'done') {
@@ -8271,7 +8651,7 @@ class AppUI {
           const g = (state.goals || []).find(x => x.id === o.goalId);
           const s = g && g.steps ? g.steps.find(x => x.id === o.stepId) : null;
           if (s) {
-            linkedStepText = `<div style="font-size: 11px; color: ${PALETTE.cozyPurple}; font-weight: 700; margin-top: 3px;">🧶 Meta: ${g.title} · Passo: ${s.title}</div>`;
+            linkedStepText = `<div style="font-size: 11px; color: ${PALETTE.cozyPurple}; font-weight: 700; margin-top: 3px;">🧶 Meta: ${escHtml(g.title)} · Passo: ${escHtml(s.title)}</div>`;
           }
         }
       }
@@ -8348,7 +8728,7 @@ class AppUI {
               <div class="timeline-body" style="flex: 1; min-width: 0;">
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 6px;">
                   <div style="display: flex; flex-direction: column; gap: 3px;">
-                    <div class="timeline-title">${item.title}</div>
+                    <div class="timeline-title">${escHtml(item.title)}</div>
                     ${stateBadge}
                   </div>
                   <span class="timeline-time-badge">⏰ ${item.time}</span>
@@ -8493,6 +8873,7 @@ class AppUI {
               ${state.notificationsEnabled ? '🔔 Ativo ✓' : 'Ativar Avisos 🔔'}
             </button>
           </div>
+          ${this.renderNotifDiagnosticsHtml()}
           <div class="flex-row" style="margin-top: 8px; gap: 6px; flex-wrap: wrap;">
             <button class="pixel-btn btn-sm ${state.darkMode ? 'btn-gold' : 'btn-secondary'}" onclick="window.app.toggleDarkMode()">
               ${state.darkMode ? '☀️ Tema Claro' : '🌙 Modo Noturno'}
@@ -8613,14 +8994,14 @@ class AppUI {
               <label style="font-size: 12px; font-weight: 700;">🎯 Meta opcional:</label>
               <select id="qc-occ-goal" class="pixel-input" onchange="window.app.onQuickCreateGoalChange(this.value)">
                 <option value="">Sem meta vinculada</option>
-                ${(state.goals || []).map(g => `<option value="${g.id}" ${state.quickCreateSelectedGoalId === g.id ? 'selected' : ''}>${g.title}</option>`).join('')}
+                ${(state.goals || []).map(g => `<option value="${g.id}" ${state.quickCreateSelectedGoalId === g.id ? 'selected' : ''}>${escHtml(g.title)}</option>`).join('')}
               </select>
             </div>
             <div style="flex: 1;">
               <label style="font-size: 12px; font-weight: 700;">🐾 Passo da meta:</label>
               <select id="qc-occ-step" class="pixel-input">
                 <option value="">Sem passo vinculado</option>
-                ${availableSteps.map(s => `<option value="${s.id}">${s.title}</option>`).join('')}
+                ${availableSteps.map(s => `<option value="${s.id}">${escHtml(s.title)}</option>`).join('')}
               </select>
             </div>
           </div>
@@ -8665,7 +9046,7 @@ class AppUI {
             <div style="flex: 1;">
               <label style="font-size: 12px; font-weight: 700;">🧶 Cor do Novelo:</label>
               <select id="qc-goal-color" class="pixel-input">
-                ${YARN_COLORS.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+                ${YARN_COLORS.map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`).join('')}
               </select>
             </div>
           </div>
@@ -8892,8 +9273,107 @@ class AppUI {
     this.persist();
   }
 
+  // Diagnóstico dos avisos no Android: mostra o que impede um aviso de chegar e leva à tela certa.
+  getNotifStatus() {
+    try {
+      if (window.AndroidNotify && typeof window.AndroidNotify.status === 'function') {
+        return JSON.parse(window.AndroidNotify.status());
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  renderNotifDiagnosticsHtml() {
+    const st = this.getNotifStatus();
+    if (!st) return '';
+    const notifOk = st.notifications && !st.channelBlocked;
+    const rows = [
+      { ok: notifOk, label: 'Permissão para avisar', fix: 'window.app.notifFixNotifications()', btn: 'Permitir',
+        hint: notifOk ? '' : 'Sem essa permissão o Android esconde todos os avisos da gatinha.' },
+      { ok: st.exactAlarm, label: 'Horário exato', fix: 'window.app.notifFixExact()', btn: 'Permitir',
+        hint: st.exactAlarm ? '' : 'Sem ela os avisos podem atrasar vários minutos.' },
+      { ok: st.batteryUnrestricted, label: 'Sem economia de bateria', fix: 'window.app.notifFixBattery()', btn: 'Liberar',
+        hint: st.batteryUnrestricted ? '' : this.batteryHint(st.manufacturer) }
+    ];
+    const rowsHtml = rows.map(r => `
+      <div style="display: flex; align-items: center; gap: 8px; padding: 4px 0;">
+        <span style="font-size: 16px;">${r.ok ? '✅' : '⚠️'}</span>
+        <div style="flex: 1; min-width: 0;">
+          <div style="font-size: 13px; font-weight: 700;">${r.label}</div>
+          ${r.hint ? `<div style="font-size: 12px; color: ${PALETTE.grayDark}; line-height: 1.3;">${escHtml(r.hint)}</div>` : ''}
+        </div>
+        ${r.ok ? '' : `<button class="pixel-btn btn-sm btn-purple" style="min-height: 40px;" onclick="${r.fix}">${r.btn}</button>`}
+      </div>`).join('');
+    const allOk = rows.every(r => r.ok);
+    return `
+      <div style="margin-top: 8px; padding: 8px 10px; background: #fff; border: 2px dashed ${PALETTE.cozyPurple};">
+        <div style="font-size: 13px; font-weight: 700; margin-bottom: 2px;">${allOk ? '🐾 Tudo certo para os avisos chegarem' : '🐾 Falta ajustar para os avisos chegarem'}</div>
+        ${rowsHtml}
+        <div class="flex-row" style="gap: 6px; flex-wrap: wrap; margin-top: 6px;">
+          <button class="pixel-btn btn-sm btn-green" style="min-height: 40px;" onclick="window.app.notifTestNow()">Aviso de teste agora</button>
+          <button class="pixel-btn btn-sm btn-secondary" style="min-height: 40px;" onclick="window.app.notifTestIn1Min()">Testar em 1 minuto</button>
+        </div>
+      </div>`;
+  }
+
+  batteryHint(manufacturer) {
+    const m = String(manufacturer || '');
+    if (/xiaomi|redmi|poco/.test(m)) return 'Xiaomi: procure Início automático e deixe a bateria do Cat Line sem restrições.';
+    if (/samsung/.test(m)) return 'Samsung: em Bateria, procure Limites de uso em segundo plano e tire o Cat Line da lista de apps em suspensão.';
+    if (/oppo|realme|oneplus/.test(m)) return 'Permita o início automático e a atividade em segundo plano do Cat Line.';
+    if (/huawei|honor/.test(m)) return 'Em Início de aplicativos, gerencie manualmente e permita a atividade em segundo plano.';
+    if (/vivo|iqoo/.test(m)) return 'Permita o início automático e a atividade em segundo plano do Cat Line.';
+    return 'Se os avisos atrasarem ou sumirem, tire o Cat Line da economia de bateria.';
+  }
+
+  notifFixNotifications() { try { window.AndroidNotify.requestNotificationPermission(); } catch (e) {} }
+  notifFixExact() { try { window.AndroidNotify.openExactAlarmSettings(); } catch (e) {} }
+  notifFixBattery() { try { window.AndroidNotify.openBatterySettings(); } catch (e) {} }
+
+  notifTestNow() {
+    try { window.AndroidNotify.sendTestNow(); } catch (e) {}
+    this.setCatSpeech('Mandei um aviso agora. Se ele não apareceu, confira a permissão acima.');
+  }
+
+  notifTestIn1Min() {
+    try {
+      window.AndroidBlocker.scheduleDeadline('teste-agendado', 'Teste agendado da gatinha', 'agora', Clock.now() + 60000, 'NOW', 'pink');
+      this.setCatSpeech('Agendei um teste para daqui a 1 minuto. Pode bloquear a tela e esperar.');
+    } catch (e) {
+      this.setCatSpeech('Não consegui agendar o teste neste aparelho.');
+    }
+  }
+
+  // No APK, liga os avisos uma única vez: antes eles só funcionavam depois de achar o botão escondido na aba Mais.
+  autoEnableNativeNotifications() {
+    if (!window.AndroidNotify) return;
+    let done = false;
+    try { done = localStorage.getItem('CATLINE_NOTIF_AUTO_V1') === '1'; } catch (e) {}
+    if (done) return;
+    try { localStorage.setItem('CATLINE_NOTIF_AUTO_V1', '1'); } catch (e) {}
+    if (!state.notificationsEnabled) {
+      state.notificationsEnabled = true;
+      this.persist();
+    }
+  }
+
   // Lembretes Reais no Horário dos Compromissos
   async requestRealReminders() {
+    // No APK os avisos são do Android. O botão confere a permissão em vez de depender da API de notificação da web.
+    if (window.AndroidNotify) {
+      state.notificationsEnabled = !state.notificationsEnabled;
+      if (state.notificationsEnabled) {
+        const st = this.getNotifStatus();
+        if (st && (!st.notifications || st.channelBlocked)) this.notifFixNotifications();
+        this.setCatSpeech('Avisos ligados! Confira abaixo se o Android deixa eles chegarem.');
+      } else {
+        this.setCatSpeech('Avisos desligados. Nenhum alarme fica agendado.');
+      }
+      this.syncNativeReminders();
+      this.renderActiveTab();
+      this.persist();
+      return;
+    }
     if (!('Notification' in window)) {
       alert('Este navegador/aparelho usa lembretes sonoros internos do Cat Line! Mantenha o som ativo.');
       state.notificationsEnabled = true;
@@ -8955,54 +9435,68 @@ class AppUI {
     // Banner superior removido
   }
 
+  // Agenda no Android os avisos de compromissos e prazos de metas. Cada compromisso usa a PROPRIA data,
+  // então o aviso chega mesmo com o app fechado. Só reenvia o que mudou desde a última sincronização.
   syncNativeReminders() {
-    if (!window.AndroidBlocker || typeof window.AndroidBlocker.scheduleReminder !== 'function') return;
-    if (!state.notificationsEnabled || state.cat.isRestMode) return;
+    const nb = window.AndroidBlocker;
+    if (!nb || (typeof nb.scheduleDeadline !== 'function' && typeof nb.scheduleReminder !== 'function')) return;
+    if (typeof CatLineReminderPlanner === 'undefined') return;
+    const notify = window.AndroidNotify;
+
+    if (!state.notificationsEnabled || state.cat.isRestMode) {
+      // Avisos desligados ou modo descanso: nada de alarme pendente no Android
+      if (this._nativePlan === undefined || (this._nativePlan && this._nativePlan.length > 0) || this._nativeCleared !== true) {
+        try {
+          if (notify && typeof notify.cancelAllReminders === 'function') notify.cancelAllReminders();
+          else (this._nativePlan || []).forEach(i => nb.cancelReminder(i.id));
+        } catch (e) {}
+        this._nativePlan = [];
+        this._nativeCleared = true;
+      }
+      return;
+    }
+    this._nativeCleared = false;
+
+    // Primeira sincronização desta abertura: começa do zero para não deixar alarme antigo para trás
+    if (this._nativePlan === undefined) {
+      try { if (notify && typeof notify.cancelAllReminders === 'function') notify.cancelAllReminders(); } catch (e) {}
+      this._nativePlan = [];
+    }
 
     const nowMs = Clock.now();
+    const plan = CatLineReminderPlanner.planReminders(
+      { occurrences: state.occurrences, goals: state.goals, dayKey: state.dayKey, nowMs },
+      {
+        makeLocalDate: (y, mo, d, h, mi) => {
+          const dt = Clock.newDate();
+          dt.setFullYear(y, mo - 1, d);
+          dt.setHours(h, mi, 0, 0);
+          return dt.getTime();
+        }
+      }
+    );
 
-    state.occurrences.forEach(o => {
+    // Compromissos que deixaram de estar pendentes perdem os avisos, uma vez por abertura
+    if (!this._cancelledIds) this._cancelledIds = new Set();
+    (state.occurrences || []).forEach(o => {
+      if (!o) return;
       const st = String(o.state || 'pending').toLowerCase();
-      if (st !== 'pendente' && st !== 'pending') {
-        try { window.AndroidBlocker.cancelReminder(o.id); } catch (e) {}
-        return;
+      if (st === 'pending' || st === 'pendente') { this._cancelledIds.delete(o.id); return; }
+      if (!this._cancelledIds.has(o.id)) {
+        this._cancelledIds.add(o.id);
+        try { nb.cancelReminder(o.id); } catch (e) {}
       }
-      const parts = (o.time || '19:00').split(':').map(Number);
-      if (isNaN(parts[0])) return;
-      const d = Clock.newDate();
-      d.setHours(parts[0], parts[1] || 0, 0, 0);
-      const goal = o.goalId ? (state.goals || []).find(g => g.id === o.goalId) : null;
-      this.scheduleNovelo(o.id, o.title, o.time, d.getTime(), (goal && goal.yarnColorId) || 'pink', nowMs, false);    });
-
-    // Prazos das metas (novelo de cada meta com a cor dela)
-    (state.goals || []).forEach(g => {
-      const id = 'goal-' + g.id;
-      if (g.archived || (g.progress >= 1) || !(g.remainingSeconds > 0)) {
-        try { window.AndroidBlocker.cancelReminder(id); } catch (e) {}
-        return;
-      }
-      const deadline = nowMs + g.remainingSeconds * 1000;
-      const dd = Clock.newDate(deadline);
-      const hhmm = String(dd.getHours()).padStart(2, '0') + ':' + String(dd.getMinutes()).padStart(2, '0');
-      this.scheduleNovelo(id, g.title, hhmm, deadline, g.yarnColorId || g.yarnColor || 'pink', nowMs, true);
     });
-  }
 
-  // Agenda os avisos escalonados do novelo: 1 dia antes (so metas), 1h antes, na hora e ao vencer.
-  scheduleNovelo(id, title, hhmm, atMs, color, nowMs, withDayBefore) {
-    const nb = window.AndroidBlocker;
-    if (!nb) return;
-    const H = 3600000;
-    const plan = [];
-    if (withDayBefore) plan.push(['PRE_DAY', atMs - 24 * H]);
-    plan.push(['PRE_HOUR', atMs - H], ['NOW', atMs], ['OVERDUE', atMs + (withDayBefore ? H : 15 * 60000)]);
-    plan.forEach(([kind, t]) => {
-      if (t <= nowMs) return;
+    const diff = CatLineReminderPlanner.diffPlans(this._nativePlan, plan.items);
+    diff.cancel.forEach(id => { try { nb.cancelReminder(id); } catch (e) {} });
+    diff.schedule.forEach(i => {
       try {
-        if (typeof nb.scheduleDeadline === 'function') nb.scheduleDeadline(id, title, hhmm, t, kind, color);
-        else if (kind === 'NOW') nb.scheduleReminder(id, title, hhmm, t);
+        if (typeof nb.scheduleDeadline === 'function') nb.scheduleDeadline(i.id, i.title, i.time, i.at, i.kind, i.color);
+        else if (i.kind === 'NOW') nb.scheduleReminder(i.id, i.title, i.time, i.at);
       } catch (e) {}
     });
+    this._nativePlan = plan.items;
   }
 
   async checkAppUpdate() {

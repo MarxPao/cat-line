@@ -89,8 +89,11 @@ const manifest = `<?xml version="1.0" encoding="utf-8"?>
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Nao e concedida na instalacao. So vale se a usuaria rodar pm grant por ADB, para o app ligar o proprio servico. -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
 
     <queries>
         <package android:name="com.instagram.android" />
@@ -163,7 +166,20 @@ const manifest = `<?xml version="1.0" encoding="utf-8"?>
                 <action android:name="com.catline.app.ACTION_COMPLETE_TASK" />
                 <action android:name="com.catline.app.ACTION_SNOOZE_TASK" />
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name="com.catline.app.CatLineWidgetProvider"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_hoje_info" />
         </receiver>
     </application>
 </manifest>`;
@@ -176,6 +192,7 @@ console.log("4. Gerando MainActivity.java nativo...");
 const mainActivityJava = `package com.catline.app;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.os.Bundle;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -186,6 +203,7 @@ import android.graphics.Color;
 
 public class MainActivity extends Activity {
     private WebView webView;
+    private FileBridge fileBridge;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -203,8 +221,10 @@ public class MainActivity extends Activity {
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
-        settings.setAllowFileAccess(true);
-        settings.setAllowContentAccess(true);
+        settings.setAllowFileAccess(false);
+        settings.setAllowFileAccessFromFileURLs(false);
+        settings.setAllowUniversalAccessFromFileURLs(false);
+        settings.setAllowContentAccess(false);
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setUseWideViewPort(true);
         settings.setLoadWithOverviewMode(true);
@@ -213,8 +233,25 @@ public class MainActivity extends Activity {
         webView.setWebViewClient(new WebViewClient());
         webView.setWebChromeClient(new WebChromeClient());
         webView.addJavascriptInterface(new BlockerBridge(this), "AndroidBlocker");
+        fileBridge = new FileBridge(this, webView);
+        webView.addJavascriptInterface(fileBridge, "AndroidFiles");
+        webView.addJavascriptInterface(new WidgetBridge(this), "AndroidWidget");
+        webView.addJavascriptInterface(new NotifyBridge(this), "AndroidNotify");
         webView.loadUrl("file:///android_asset/index.html");
         setContentView(webView);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Se a usuaria pediu e o aparelho deu a permissao avancada, religa o bloqueio caso o Android o tenha desligado
+        AccessibilityEnabler.healIfNeeded(this);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (fileBridge != null && fileBridge.handleResult(requestCode, resultCode, data)) return;
+        super.onActivityResult(requestCode, resultCode, data);
     }
 
     @Override
@@ -284,10 +321,31 @@ const alignedApk = path.join(BUILD_DIR, 'aligned.apk');
 if (fs.existsSync(alignedApk)) fs.unlinkSync(alignedApk);
 execSync(`${ZIPALIGN} -p -f -v 4 "${unalignedApk}" "${alignedApk}"`, { stdio: 'inherit' });
 
-// 11. Gera Keystore com startdate em 2020/01/01
-const keystorePath = path.join(BUILD_DIR, 'catline-v3.keystore');
-console.log("11. Gerando certificado X.509 com startdate 2020/01/01...");
-if (!fs.existsSync(keystorePath)) execSync(`${KEYTOOL} -genkeypair -v -keystore "${keystorePath}" -storetype PKCS12 -alias catline -keyalg RSA -keysize 2048 -sigalg SHA256withRSA -startdate "2020/01/01 00:00:00" -validity 12000 -storepass deadline123 -keypass deadline123 -dname "CN=CatLine, OU=Mobile, O=CatLine, L=SP, ST=SP, C=BR"`, { stdio: 'inherit' });
+// 11. Keystore de assinatura
+// A assinatura estavel e o que permite atualizar o app sem perder dados e registrar o pacote.
+// Release: informe CATLINE_KEYSTORE (caminho), CATLINE_KEYSTORE_PASS e, se precisar, CATLINE_KEY_ALIAS / CATLINE_KEY_PASS.
+// Sem variaveis: gera uma chave local de DESENVOLVIMENTO em build-apk/ (nao use para publicar).
+let keystorePath = process.env.CATLINE_KEYSTORE ? path.resolve(process.env.CATLINE_KEYSTORE) : '';
+let keystorePass = process.env.CATLINE_KEYSTORE_PASS || '';
+const keyAlias = process.env.CATLINE_KEY_ALIAS || 'catline';
+let keyPass = process.env.CATLINE_KEY_PASS || '';
+
+if (keystorePath) {
+  if (!fs.existsSync(keystorePath)) throw new Error(`CATLINE_KEYSTORE nao encontrado: ${keystorePath}`);
+  if (!keystorePass) throw new Error('Defina CATLINE_KEYSTORE_PASS junto com CATLINE_KEYSTORE.');
+  console.log("11. Usando keystore de release informada por CATLINE_KEYSTORE.");
+} else {
+  keystorePath = path.join(BUILD_DIR, 'catline-dev.keystore');
+  const passFile = path.join(BUILD_DIR, 'catline-dev.pass');
+  if (!fs.existsSync(keystorePath) || !fs.existsSync(passFile)) {
+    console.log("11. Gerando keystore local de DESENVOLVIMENTO (sem CATLINE_KEYSTORE)...");
+    if (fs.existsSync(keystorePath)) fs.unlinkSync(keystorePath);
+    fs.writeFileSync(passFile, require('crypto').randomBytes(18).toString('hex'));
+    execSync(`${KEYTOOL} -genkeypair -keystore "${keystorePath}" -storetype PKCS12 -alias ${keyAlias} -keyalg RSA -keysize 2048 -sigalg SHA256withRSA -validity 12000 -storepass:file "${passFile}" -keypass:file "${passFile}" -dname "CN=CatLine Dev, O=CatLine, C=BR"`, { stdio: 'inherit' });
+  }
+  keystorePass = fs.readFileSync(passFile, 'utf8').trim();
+  console.warn("!! APK assinado com chave de DESENVOLVIMENTO. Ele nao atualiza instalacoes feitas com a chave de release e nao deve ser publicado. !!");
+}
 
 // 12. Assina o APK final com apksigner (V1 + V2 + V3)
 console.log("12. Assinando APK com apksigner (v1 + v2 + v3)...");
@@ -297,7 +355,8 @@ const versionApk = path.resolve('CatLine-v3.1.0.apk');
 const webApk = path.resolve('web-preview', 'CatLine-Instalador.apk');
 if (fs.existsSync(finalApk)) fs.unlinkSync(finalApk);
 
-execSync(`${JAVA} -jar ${APKSIGNER_JAR} sign --ks "${keystorePath}" --ks-pass pass:deadline123 --ks-key-alias catline --min-sdk-version 21 --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true --out "${finalApk}" "${alignedApk}"`, { stdio: 'inherit' });
+const signEnv = Object.assign({}, process.env, { CATLINE_SIGN_KS_PASS: keystorePass, CATLINE_SIGN_KEY_PASS: keyPass || keystorePass });
+execSync(`${JAVA} -jar ${APKSIGNER_JAR} sign --ks "${keystorePath}" --ks-pass env:CATLINE_SIGN_KS_PASS --key-pass env:CATLINE_SIGN_KEY_PASS --ks-key-alias ${keyAlias} --min-sdk-version 21 --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true --out "${finalApk}" "${alignedApk}"`, { stdio: 'inherit', env: signEnv });
 
 normalizeTimestamp(finalApk);
 fs.copyFileSync(finalApk, installerApk);

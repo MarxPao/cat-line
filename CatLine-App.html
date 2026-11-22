@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Cat Line — Agenda, Hábitos, Metas e Foco 8-Bit</title>
+  <meta http-equiv="Content-Security-Policy" content="object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'">
   <meta name="theme-color" content="#181425">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -4397,6 +4398,33 @@ body.dark-mode .weekly-stat-card {
   const SCHEMA_VERSION = 2;
   const APP_VERSION = '3.2.0';
 
+  const ID_KEY = /^(?:id|[A-Za-z]+Id)$/;
+  const UNSAFE_ID_CHARS = /[<>"'`\\$&\s\u0000-\u001f]/;
+
+  /**
+   * Procura recursivamente por campos de identificador com caracteres perigosos.
+   * Retorna o caminho do primeiro encontrado ou null.
+   */
+  function findUnsafeId(node, pathName, depth) {
+    if (depth > 12 || node === null || typeof node !== 'object') return null;
+    if (Array.isArray(node)) {
+      for (let i = 0; i < node.length; i++) {
+        const found = findUnsafeId(node[i], pathName + '[' + i + ']', depth + 1);
+        if (found) return found;
+      }
+      return null;
+    }
+    for (const key of Object.keys(node)) {
+      const value = node[key];
+      if (ID_KEY.test(key) && typeof value === 'string' && (value.length > 200 || UNSAFE_ID_CHARS.test(value))) {
+        return pathName + '.' + key;
+      }
+      const found = findUnsafeId(value, pathName + '.' + key, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+
   class BackupEngine {
     constructor(options = {}) {
       this.clock = options.clock || (typeof Clock !== 'undefined' ? Clock : null);
@@ -4452,6 +4480,7 @@ body.dark-mode .weekly-stat-card {
         effort: o.effort || 'M',
         reward: typeof o.reward === 'number' ? o.reward : 10,
         delayMin: typeof o.delayMin === 'number' ? o.delayMin : 0,
+        ...(o.icsKey ? { icsKey: String(o.icsKey) } : {}),
         createdAt: o.createdAt || nowIso
       }));
 
@@ -4505,6 +4534,7 @@ body.dark-mode .weekly-stat-card {
         rewardEvents,
         dayClosures,
         weeklyLogs,
+        moodLog: Array.isArray(state.moodLog) ? state.moodLog : [],
         habits: state.habits || [],
         briefing: state.briefing || {},
         blockRules: state.blockRules || [],
@@ -4566,6 +4596,13 @@ body.dark-mode .weekly-stat-card {
           }
         }
         data.schemaVersion = SCHEMA_VERSION;
+      }
+
+      // Identificadores sao usados em atributos HTML (onclick/id). Um backup adulterado
+      // nao pode trazer ids com aspas, tags ou espacos.
+      const unsafeIdPath = findUnsafeId(data, 'backup', 0);
+      if (unsafeIdPath) {
+        return { valid: false, error: 'Backup com identificador inválido em ' + unsafeIdPath };
       }
 
       const goals = Array.isArray(data.goals) ? data.goals : [];
@@ -4745,6 +4782,19 @@ body.dark-mode .weekly-stat-card {
         }
       });
 
+      // 9b. Humor do dia (um registro por dia; vence o mais recente)
+      const moodByDay = new Map();
+      (Array.isArray(merged.moodLog) ? merged.moodLog : [])
+        .concat(Array.isArray(backupData.moodLog) ? backupData.moodLog : [])
+        .forEach(e => {
+          if (!e || typeof e.dayKey !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(e.dayKey) || !Number.isInteger(e.level) || e.level < 1 || e.level > 5) return;
+          const prev = moodByDay.get(e.dayKey);
+          if (!prev || String(e.at || '') > String(prev.at || '')) {
+            moodByDay.set(e.dayKey, { dayKey: e.dayKey, level: e.level, at: typeof e.at === 'string' ? e.at : null });
+          }
+        });
+      merged.moodLog = Array.from(moodByDay.values()).sort((a, b) => (a.dayKey < b.dayKey ? -1 : 1));
+
       // 10. Atualiza schemaVersion
       merged.schemaVersion = SCHEMA_VERSION;
       delete merged.moduleFlags;
@@ -4766,6 +4816,802 @@ body.dark-mode .weekly-stat-card {
 </script>
   <script>
 /**
+ * mood-checkin-engine.js
+ * Check-in de humor diário da Cat Line.
+ *
+ * Motor puro e determinístico: não lê relógio, DOM nem localStorage.
+ * Quem chama informa dayKey e instante (ISO) já calculados pelo Clock.
+ *
+ * Regras do produto:
+ * - 1 registro por dia lógico; registrar de novo no mesmo dia substitui o anterior.
+ * - Nenhuma inferência antes de 7 dias com registro.
+ * - Linguagem de coincidência, nunca de causa, e sem julgamento.
+ * - Sem parênteses descritivos nos textos mostrados à usuária.
+ */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) {
+    module.exports = factory();
+  } else {
+    root.CatLineMoodEngine = factory();
+  }
+})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+  'use strict';
+
+  const MIN_DAYS_FOR_INSIGHT = 7;
+  const MAX_ENTRIES = 400;
+  const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/;
+
+  const LEVELS = [
+    { level: 1, emoji: '😣', label: 'Pesado', speech: 'Hoje está pesado, né? Vamos devagarinho. Eu fico aqui pertinho de você.' },
+    { level: 2, emoji: '😕', label: 'Cansada', speech: 'Dia cansado também conta. Escolha só uma coisinha pequena e o resto pode esperar.' },
+    { level: 3, emoji: '😐', label: 'Mais ou menos', speech: 'Mais ou menos é um bom ponto de partida. Bora puxar o fio com calma?' },
+    { level: 4, emoji: '🙂', label: 'Bem', speech: 'Que bom saber que você está bem! Vamos aproveitar esse ritmo gostoso.' },
+    { level: 5, emoji: '😄', label: 'Ótima', speech: 'Miau! Dia ótimo! O novelo está até saltitando de alegria.' }
+  ];
+
+  function levelInfo(level) {
+    return LEVELS.find(l => l.level === level) || null;
+  }
+
+  function isValidDayKey(dayKey) {
+    return typeof dayKey === 'string' && DAY_KEY.test(dayKey);
+  }
+
+  function isValidLevel(level) {
+    return Number.isInteger(level) && level >= 1 && level <= 5;
+  }
+
+  /**
+   * Devolve um novo log com o humor do dia registrado ou substituído.
+   * Mantém no máximo MAX_ENTRIES dias, descartando os mais antigos.
+   */
+  function recordMood(log, entry) {
+    if (!entry || !isValidDayKey(entry.dayKey)) throw new Error('dayKey inválido');
+    if (!isValidLevel(entry.level)) throw new Error('level deve ser inteiro de 1 a 5');
+    const base = Array.isArray(log) ? log.filter(e => e && e.dayKey !== entry.dayKey) : [];
+    base.push({ dayKey: entry.dayKey, level: entry.level, at: entry.atIso || null });
+    base.sort((a, b) => (a.dayKey < b.dayKey ? -1 : a.dayKey > b.dayKey ? 1 : 0));
+    return base.length > MAX_ENTRIES ? base.slice(base.length - MAX_ENTRIES) : base;
+  }
+
+  function getMoodForDay(log, dayKey) {
+    if (!Array.isArray(log)) return null;
+    return log.find(e => e && e.dayKey === dayKey) || null;
+  }
+
+  /** Remove entradas malformadas, por exemplo vindas de um backup antigo. */
+  function sanitizeLog(log) {
+    if (!Array.isArray(log)) return [];
+    let out = [];
+    log.forEach(e => {
+      if (e && isValidDayKey(e.dayKey) && isValidLevel(e.level)) {
+        out = recordMood(out, { dayKey: e.dayKey, level: e.level, atIso: typeof e.at === 'string' ? e.at : null });
+      }
+    });
+    return out;
+  }
+
+  /** Junta dois logs; no mesmo dia vence o registro mais recente. */
+  function mergeLogs(localLog, incomingLog) {
+    const byDay = new Map();
+    sanitizeLog(localLog).concat(sanitizeLog(incomingLog)).forEach(e => {
+      const prev = byDay.get(e.dayKey);
+      if (!prev || String(e.at || '') > String(prev.at || '')) byDay.set(e.dayKey, e);
+    });
+    let out = [];
+    byDay.forEach(e => { out = recordMood(out, { dayKey: e.dayKey, level: e.level, atIso: e.at }); });
+    return out;
+  }
+
+  /** Taxa de cumprimento de um dia: feitos dividido por compromissos que contam. */
+  function dayFulfillment(occurrences, dayKey) {
+    const list = (Array.isArray(occurrences) ? occurrences : []).filter(o => o && o.date === dayKey && o.state !== 'rescheduled');
+    if (list.length === 0) return null;
+    const done = list.filter(o => o.state === 'done' || o.state === 'FEITO').length;
+    return done / list.length;
+  }
+
+  function mean(values) {
+    return values.reduce((a, b) => a + b, 0) / values.length;
+  }
+
+  /**
+   * Insight em linguagem de coincidência.
+   * Retorna sempre um objeto com status:
+   *  - 'observando': ainda não há 7 dias de registro
+   *  - 'sem_contraste': faltam dias leves ou dias bons para comparar
+   *  - 'ok': mensagem pronta em message
+   */
+  function moodInsight(log, occurrences, untilDayKey) {
+    const entries = sanitizeLog(log).filter(e => !untilDayKey || e.dayKey <= untilDayKey);
+    if (entries.length < MIN_DAYS_FOR_INSIGHT) {
+      return { status: 'observando', daysCollected: entries.length, daysNeeded: MIN_DAYS_FOR_INSIGHT };
+    }
+
+    const light = [];
+    const good = [];
+    entries.forEach(e => {
+      const rate = dayFulfillment(occurrences, e.dayKey);
+      if (rate === null) return;
+      if (e.level <= 2) light.push(rate);
+      else if (e.level >= 4) good.push(rate);
+    });
+
+    if (light.length < 2 || good.length < 2) {
+      return { status: 'sem_contraste', daysCollected: entries.length, lightDays: light.length, goodDays: good.length };
+    }
+
+    const lightPct = Math.round(mean(light) * 100);
+    const goodPct = Math.round(mean(good) * 100);
+    const diff = goodPct - lightPct;
+    let message;
+    if (diff >= 15) {
+      message = 'Nos dias em que você marcou mais cansada, nosso fio ficou um pouco mais solto. Pode ser coincidência, mas talvez valha planejar menos coisas nesses dias.';
+    } else if (diff <= -15) {
+      message = 'Curioso: nos dias mais pesados, você até cumpriu mais. Às vezes fazer uma coisinha ajuda, mas só você sabe o que é melhor para cada dia.';
+    } else {
+      message = 'Mesmo nos dias mais pesados, nosso fio seguiu firme. Tenho muito orgulho de você.';
+    }
+
+    return {
+      status: 'ok',
+      message,
+      daysCollected: entries.length,
+      lightDays: light.length,
+      goodDays: good.length,
+      lightRatePct: lightPct,
+      goodRatePct: goodPct
+    };
+  }
+
+  /** Resumo simples da semana que termina em endDayKey, com até 7 dias. */
+  function weekStrip(log, endDayKey) {
+    const entries = sanitizeLog(log);
+    const result = [];
+    const end = new Date(endDayKey + 'T12:00:00Z');
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(end.getTime() - i * 86400000);
+      const key = d.toISOString().slice(0, 10);
+      const found = entries.find(e => e.dayKey === key);
+      result.push({ dayKey: key, level: found ? found.level : null });
+    }
+    return result;
+  }
+
+  return {
+    LEVELS,
+    MIN_DAYS_FOR_INSIGHT,
+    levelInfo,
+    recordMood,
+    getMoodForDay,
+    sanitizeLog,
+    mergeLogs,
+    dayFulfillment,
+    moodInsight,
+    weekStrip
+  };
+});
+
+</script>
+  <script>
+/**
+ * step-templates.js
+ * Passos prontos para quebrar uma meta em partes pequenas, 100% offline.
+ *
+ * Motor puro: recebe o título da meta e devolve uma sugestão. Nada é aplicado
+ * sem toque da usuária, e a usuária escolhe quais passos adicionar.
+ * Textos sem parênteses descritivos e em tom acolhedor.
+ */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) {
+    module.exports = factory();
+  } else {
+    root.CatLineStepTemplates = factory();
+  }
+})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+  'use strict';
+
+  const TEMPLATES = {
+    ESTUDO: {
+      label: 'Estudo',
+      keywords: ['estud', 'ler ', 'leitur', 'livro', 'aula', 'curso', 'prova', 'concurso', 'resumo', 'tcc', 'faculdade', 'idioma', 'inglês', 'ingles'],
+      steps: [
+        { title: 'Separar o material e uma garrafinha de água', estMinutes: 5 },
+        { title: 'Ler o objetivo da sessão', estMinutes: 5 },
+        { title: 'Estudar com foco total', estMinutes: 25 },
+        { title: 'Pausa para esticar o corpo', estMinutes: 5 },
+        { title: 'Fazer um resumo curtinho do que aprendi', estMinutes: 15 },
+        { title: 'Anotar as dúvidas para a próxima vez', estMinutes: 5 }
+      ]
+    },
+    TREINO: {
+      label: 'Movimento',
+      keywords: ['trein', 'academia', 'corr', 'caminhad', 'exerc', 'calistenia', 'yoga', 'pilates', 'pedal', 'nata', 'alongar'],
+      steps: [
+        { title: 'Separar a roupa e a garrafa de água', estMinutes: 5 },
+        { title: 'Aquecer o corpo', estMinutes: 5 },
+        { title: 'Fazer o bloco principal do treino', estMinutes: 25 },
+        { title: 'Alongar com calma', estMinutes: 5 },
+        { title: 'Beber água e registrar como me senti', estMinutes: 5 }
+      ]
+    },
+    TRABALHO: {
+      label: 'Trabalho',
+      keywords: ['trabalh', 'reuni', 'projeto', 'email', 'e-mail', 'relat', 'cliente', 'entrega', 'apresenta', 'proposta', 'planilha'],
+      steps: [
+        { title: 'Listar o que precisa sair hoje', estMinutes: 10 },
+        { title: 'Escolher a tarefa mais importante', estMinutes: 5 },
+        { title: 'Trabalhar nela sem distrações', estMinutes: 25 },
+        { title: 'Responder o que ficou pendente', estMinutes: 15 },
+        { title: 'Anotar o próximo passo para amanhã', estMinutes: 5 }
+      ]
+    },
+    CASA: {
+      label: 'Casa',
+      keywords: ['organiz', 'limp', 'lavar', 'faxina', 'arrum', 'casa', 'quarto', 'cozinha', 'roupa', 'mudança', 'mudanca', 'banheiro'],
+      steps: [
+        { title: 'Escolher um cantinho para cuidar', estMinutes: 2 },
+        { title: 'Recolher o que está fora do lugar', estMinutes: 10 },
+        { title: 'Limpar a superfície principal', estMinutes: 15 },
+        { title: 'Levar o lixo e o que não uso mais', estMinutes: 5 },
+        { title: 'Admirar o cantinho pronto', estMinutes: 2 }
+      ]
+    },
+    COMENDO_BEBENDO: {
+      label: 'Alimentação',
+      keywords: ['cozinh', 'almoç', 'almoc', 'jantar', 'lanche', 'receita', 'marmita', 'dieta', 'refeição', 'refeicao', 'beber água', 'beber agua'],
+      steps: [
+        { title: 'Escolher o que vou comer', estMinutes: 10 },
+        { title: 'Separar os ingredientes', estMinutes: 10 },
+        { title: 'Preparar com calma', estMinutes: 20 },
+        { title: 'Comer sem pressa e sem telas', estMinutes: 20 },
+        { title: 'Lavar a louça e guardar as sobras', estMinutes: 10 }
+      ]
+    },
+    DESCANSO_SONO: {
+      label: 'Descanso',
+      keywords: ['dorm', 'sono', 'descans', 'relax', 'medit', 'respira', 'soneca'],
+      steps: [
+        { title: 'Deixar o celular longe da cama', estMinutes: 2 },
+        { title: 'Baixar a luz e arrumar o ambiente', estMinutes: 10 },
+        { title: 'Respirar fundo cinco vezes', estMinutes: 3 },
+        { title: 'Descansar sem culpa', estMinutes: 20 }
+      ]
+    },
+    GERAL: {
+      label: 'Geral',
+      keywords: [],
+      steps: [
+        { title: 'Separar o que vou precisar', estMinutes: 5 },
+        { title: 'Começar pela parte mais fácil', estMinutes: 15 },
+        { title: 'Fazer uma pausa curtinha', estMinutes: 5 },
+        { title: 'Continuar até terminar uma parte', estMinutes: 20 },
+        { title: 'Revisar e comemorar com a gatinha', estMinutes: 10 }
+      ]
+    }
+  };
+
+  const ORDER = ['ESTUDO', 'TREINO', 'TRABALHO', 'CASA', 'COMENDO_BEBENDO', 'DESCANSO_SONO'];
+
+  function normalize(text) {
+    return ' ' + String(text == null ? '' : text).toLowerCase().trim() + ' ';
+  }
+
+  /** Categoria com mais palavras-chave encontradas; empate vence a primeira da ordem. */
+  function detectCategory(title) {
+    const t = normalize(title);
+    let best = 'GERAL';
+    let bestScore = 0;
+    ORDER.forEach(cat => {
+      const score = TEMPLATES[cat].keywords.reduce((n, k) => n + (t.includes(k) ? 1 : 0), 0);
+      if (score > bestScore) { best = cat; bestScore = score; }
+    });
+    return best;
+  }
+
+  /**
+   * Sugere passos para a meta. existingTitles evita repetir passos que a usuária já tem.
+   * Devolve cópias, então alterar o resultado nunca muda o catálogo.
+   */
+  function suggestSteps(goalTitle, existingTitles) {
+    const category = detectCategory(goalTitle);
+    const have = new Set((Array.isArray(existingTitles) ? existingTitles : []).map(s => String(s).trim().toLowerCase()));
+    const tpl = TEMPLATES[category];
+    const steps = tpl.steps
+      .filter(s => !have.has(s.title.toLowerCase()))
+      .map(s => ({ title: s.title, estMinutes: s.estMinutes }));
+    return { category, label: tpl.label, steps };
+  }
+
+  return { TEMPLATES, detectCategory, suggestSteps };
+});
+
+</script>
+  <script>
+/**
+ * ics-import-engine.js
+ * Lê arquivos de calendário .ics (iCalendar) e gera compromissos datados da Cat Line.
+ *
+ * Motor puro e 100% offline: não usa relógio, rede nem DOM. Quem chama informa
+ * o primeiro dia da janela (fromDayKey) e quantos dias importar (horizonDays).
+ *
+ * Suporta: DTSTART/DTEND/DURATION, horário UTC, TZID e horário local, RRULE com
+ * DAILY, WEEKLY, MONTHLY e YEARLY, INTERVAL, COUNT, UNTIL, BYDAY simples, EXDATE e
+ * RECURRENCE-ID. Eventos de dia inteiro e cancelados ficam de fora e são contados.
+ * Tudo é convertido para o horário de Brasília, que desde 2019 não tem horário de verão.
+ */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) {
+    module.exports = factory();
+  } else {
+    root.CatLineIcsImport = factory();
+  }
+})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+  'use strict';
+
+  const TARGET_OFFSET_MIN = -180; // America/Sao_Paulo
+  const MAX_INSTANCES = 300;
+  const MAX_FILE_CHARS = 2000000;
+  const MAX_LOOP = 6000;
+  const DAY_MS = 86400000;
+  const WEEKDAYS = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
+
+  // ---------- datas ----------
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function dayKeyFromUtcDate(d) { return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()); }
+  function utcDateFromDayKey(key) {
+    const [y, m, d] = key.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d));
+  }
+  function addDays(key, n) { return dayKeyFromUtcDate(new Date(utcDateFromDayKey(key).getTime() + n * DAY_MS)); }
+  function diffDays(a, b) { return Math.round((utcDateFromDayKey(a).getTime() - utcDateFromDayKey(b).getTime()) / DAY_MS); }
+  function weekday(key) { return utcDateFromDayKey(key).getUTCDay(); }
+
+  /** Offset em minutos da zona em um instante UTC, via Intl. Retorna null se a zona não existir. */
+  function zoneOffsetMinutes(tz, utcMs) {
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit'
+      }).formatToParts(new Date(utcMs));
+      const g = {};
+      parts.forEach(p => { g[p.type] = Number(p.value); });
+      const asUtc = Date.UTC(g.year, g.month - 1, g.day, g.hour, g.minute, g.second);
+      return Math.round((asUtc - utcMs) / 60000);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /** Converte horário de parede em uma zona para o horário de parede de Brasília. */
+  function wallToBrasilia(y, mo, d, h, mi, tz) {
+    const naiveUtc = Date.UTC(y, mo - 1, d, h, mi);
+    let offset = 0;
+    if (tz) {
+      const guess = zoneOffsetMinutes(tz, naiveUtc);
+      if (guess === null) return { ms: naiveUtc }; // zona desconhecida: mantém o horário como está
+      const refined = zoneOffsetMinutes(tz, naiveUtc - guess * 60000);
+      offset = refined === null ? guess : refined;
+      return { ms: naiveUtc - offset * 60000 + TARGET_OFFSET_MIN * 60000 };
+    }
+    return { ms: naiveUtc };
+  }
+
+  /** Interpreta o valor de DTSTART/DTEND/UNTIL/EXDATE. Retorna {dayKey, time, allDay, ms}. */
+  function parseDateValue(value, params) {
+    const m = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?)?(Z)?$/.exec(String(value || '').trim());
+    if (!m) return null;
+    const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+    const hasTime = m[4] !== undefined && !(params && String(params.VALUE || '').toUpperCase() === 'DATE');
+    if (!hasTime) {
+      const key = y + '-' + pad(mo) + '-' + pad(d);
+      return { dayKey: key, time: null, allDay: true, ms: Date.UTC(y, mo - 1, d) };
+    }
+    const h = Number(m[4]), mi = Number(m[5]);
+    let ms;
+    if (m[7]) {
+      ms = Date.UTC(y, mo - 1, d, h, mi) + TARGET_OFFSET_MIN * 60000;
+    } else {
+      ms = wallToBrasilia(y, mo, d, h, mi, params && params.TZID ? params.TZID : null).ms;
+    }
+    const local = new Date(ms);
+    return { dayKey: dayKeyFromUtcDate(local), time: pad(local.getUTCHours()) + ':' + pad(local.getUTCMinutes()), allDay: false, ms };
+  }
+
+  function parseDuration(value) {
+    const m = /^P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/.exec(String(value || '').trim());
+    if (!m) return null;
+    return (Number(m[1] || 0) * 7 * 1440) + (Number(m[2] || 0) * 1440) + (Number(m[3] || 0) * 60) + Number(m[4] || 0);
+  }
+
+  // ---------- texto ----------
+  function unescapeText(s) {
+    return String(s || '').replace(/\\n/gi, ' ').replace(/\\([,;\\])/g, '$1');
+  }
+  function cleanTitle(s) {
+    const t = unescapeText(s).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+    return (t || 'Compromisso do calendário').slice(0, 80);
+  }
+
+  // ---------- leitura do arquivo ----------
+  function parseProperty(line) {
+    const idx = line.indexOf(':');
+    if (idx < 1) return null;
+    const left = line.slice(0, idx);
+    const value = line.slice(idx + 1);
+    const segs = left.split(';');
+    const name = segs[0].toUpperCase();
+    const params = {};
+    segs.slice(1).forEach(p => {
+      const eq = p.indexOf('=');
+      if (eq > 0) params[p.slice(0, eq).toUpperCase()] = p.slice(eq + 1).replace(/^"|"$/g, '');
+    });
+    return { name, params, value };
+  }
+
+  function parseRrule(value) {
+    const rule = {};
+    String(value || '').split(';').forEach(part => {
+      const eq = part.indexOf('=');
+      if (eq > 0) rule[part.slice(0, eq).toUpperCase()] = part.slice(eq + 1);
+    });
+    return rule;
+  }
+
+  /** Lê o texto do .ics e devolve os eventos brutos. */
+  function parseIcs(text) {
+    const raw = String(text == null ? '' : text).slice(0, MAX_FILE_CHARS);
+    const lines = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\n[ \t]/g, '').split('\n');
+    const events = [];
+    let ev = null;
+    let alarmDepth = 0;
+    lines.forEach(line => {
+      const upper = line.trim().toUpperCase();
+      if (upper === 'BEGIN:VEVENT') { ev = { exdates: [] }; alarmDepth = 0; return; }
+      if (!ev) return;
+      if (upper === 'END:VEVENT') { events.push(ev); ev = null; return; }
+      if (upper === 'BEGIN:VALARM') { alarmDepth++; return; }
+      if (upper === 'END:VALARM') { alarmDepth = Math.max(0, alarmDepth - 1); return; }
+      if (alarmDepth > 0) return;
+      const prop = parseProperty(line);
+      if (!prop) return;
+      switch (prop.name) {
+        case 'UID': ev.uid = prop.value.trim(); break;
+        case 'SUMMARY': ev.summary = prop.value; break;
+        case 'STATUS': ev.status = prop.value.trim().toUpperCase(); break;
+        case 'DTSTART': ev.start = parseDateValue(prop.value, prop.params); break;
+        case 'DTEND': ev.end = parseDateValue(prop.value, prop.params); break;
+        case 'DURATION': ev.durationMin = parseDuration(prop.value); break;
+        case 'RRULE': ev.rrule = parseRrule(prop.value); break;
+        case 'RECURRENCE-ID': ev.recurrenceId = parseDateValue(prop.value, prop.params); break;
+        case 'EXDATE':
+          prop.value.split(',').forEach(v => {
+            const d = parseDateValue(v, prop.params);
+            if (d) ev.exdates.push(d.dayKey);
+          });
+          break;
+        default: break;
+      }
+    });
+    return events;
+  }
+
+  // ---------- expansão ----------
+  function untilKey(rule) {
+    if (!rule.UNTIL) return null;
+    const d = parseDateValue(rule.UNTIL, {});
+    return d ? d.dayKey : null;
+  }
+
+  /** Dias (dayKey) em que o evento acontece dentro da janela, respeitando COUNT, UNTIL e exceções. */
+  function expandDays(ev, windowStart, windowEnd, excluded) {
+    const first = ev.start.dayKey;
+    const rule = ev.rrule;
+    const out = [];
+    const push = key => { if (key >= windowStart && key <= windowEnd && !excluded.has(key)) out.push(key); };
+
+    if (!rule || !rule.FREQ) { push(first); return out; }
+
+    const interval = Math.max(1, parseInt(rule.INTERVAL || '1', 10) || 1);
+    const count = rule.COUNT ? Math.max(1, parseInt(rule.COUNT, 10) || 1) : null;
+    const until = untilKey(rule);
+    const freq = rule.FREQ.toUpperCase();
+    const byDay = rule.BYDAY
+      ? rule.BYDAY.split(',').map(s => s.trim().toUpperCase().replace(/^[+-]?\d+/, '')).filter(s => s in WEEKDAYS).map(s => WEEKDAYS[s])
+      : null;
+
+    let generated = 0;
+    let guard = 0;
+    const done = key => (until && key > until) || key > windowEnd;
+
+    if (freq === 'DAILY') {
+      for (let key = first; !done(key) && guard++ < MAX_LOOP; key = addDays(key, interval)) {
+        if (count !== null && generated >= count) break;
+        generated++; push(key);
+      }
+    } else if (freq === 'WEEKLY') {
+      const days = byDay && byDay.length ? byDay : [weekday(first)];
+      const startOfWeek = addDays(first, -((weekday(first) + 6) % 7)); // segunda-feira
+      for (let key = first; !done(key) && guard++ < MAX_LOOP; key = addDays(key, 1)) {
+        const weeksSince = Math.floor(diffDays(key, startOfWeek) / 7);
+        if (weeksSince % interval !== 0) continue;
+        if (!days.includes(weekday(key))) continue;
+        if (count !== null && generated >= count) break;
+        generated++; push(key);
+      }
+    } else if (freq === 'MONTHLY' || freq === 'YEARLY') {
+      const [fy, fm, fd] = first.split('-').map(Number);
+      const step = freq === 'MONTHLY' ? interval : interval * 12;
+      for (let n = 0; guard++ < MAX_LOOP; n++) {
+        const total = (fm - 1) + n * step;
+        const y = fy + Math.floor(total / 12);
+        const mo = (total % 12) + 1;
+        const lastDay = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+        if (fd > lastDay) continue; // dia inexistente neste mês, por exemplo 31
+        const key = y + '-' + pad(mo) + '-' + pad(fd);
+        if (done(key)) break;
+        if (count !== null && generated >= count) break;
+        generated++; push(key);
+      }
+    } else {
+      push(first); // frequência não suportada: só a primeira ocorrência
+    }
+    return out;
+  }
+
+  /**
+   * Converte o texto do .ics em ocorrências datadas.
+   * options: { fromDayKey (obrigatório), horizonDays (padrão 60) }
+   */
+  function importFromIcs(text, options) {
+    const opts = options || {};
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(opts.fromDayKey || '')) throw new Error('fromDayKey inválido');
+    const horizon = Math.max(1, Math.min(366, opts.horizonDays || 60));
+    const windowStart = opts.fromDayKey;
+    const windowEnd = addDays(windowStart, horizon);
+
+    const events = parseIcs(text);
+    const summary = { events: events.length, skippedAllDay: 0, skippedCancelled: 0, skippedInvalid: 0, truncated: false };
+
+    // Instâncias alteradas de séries: a série não repete naquele dia
+    const overridden = new Map();
+    events.forEach(ev => {
+      if (ev.recurrenceId && ev.uid) {
+        if (!overridden.has(ev.uid)) overridden.set(ev.uid, new Set());
+        overridden.get(ev.uid).add(ev.recurrenceId.dayKey);
+      }
+    });
+
+    const items = [];
+    events.forEach((ev, idx) => {
+      if (ev.status === 'CANCELLED') { summary.skippedCancelled++; return; }
+      if (!ev.start) { summary.skippedInvalid++; return; }
+      if (ev.start.allDay) { summary.skippedAllDay++; return; }
+
+      let minutes = 30;
+      if (ev.end && !ev.end.allDay) minutes = Math.round((ev.end.ms - ev.start.ms) / 60000);
+      else if (Number.isFinite(ev.durationMin)) minutes = ev.durationMin;
+      if (!Number.isFinite(minutes) || minutes <= 0) minutes = 30;
+      minutes = Math.max(5, Math.min(480, minutes));
+
+      const excluded = new Set(ev.exdates);
+      if (ev.uid && overridden.has(ev.uid) && !ev.recurrenceId) overridden.get(ev.uid).forEach(k => excluded.add(k));
+
+      const uid = ev.uid || ('sem-uid-' + idx + '-' + (ev.summary || ''));
+      const title = cleanTitle(ev.summary);
+      expandDays(ev, windowStart, windowEnd, excluded).forEach(dayKey => {
+        items.push({ key: 'ics:' + uid + ':' + dayKey + 'T' + ev.start.time, title, date: dayKey, time: ev.start.time, plannedMinutes: minutes });
+      });
+    });
+
+    items.sort((a, b) => (a.date + a.time < b.date + b.time ? -1 : a.date + a.time > b.date + b.time ? 1 : 0));
+    if (items.length > MAX_INSTANCES) { items.length = MAX_INSTANCES; summary.truncated = true; }
+    summary.instances = items.length;
+    summary.windowStart = windowStart;
+    summary.windowEnd = windowEnd;
+    return { items, summary };
+  }
+
+  // ---------- integração com o app ----------
+  function hash(s) {
+    let h = 5381;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+    return h.toString(36);
+  }
+
+  /** Id seguro para atributos HTML: só letras, números, _ e -. */
+  function safeId(key) {
+    return 'ics_' + key.replace(/[^A-Za-z0-9]+/g, '_').slice(0, 40) + '_' + hash(key);
+  }
+
+  /** Cria ocorrências no formato do app, pulando as já importadas antes. */
+  function toOccurrences(items, existingOccurrences) {
+    const have = new Set((Array.isArray(existingOccurrences) ? existingOccurrences : []).map(o => o && o.icsKey).filter(Boolean));
+    const out = [];
+    let duplicates = 0;
+    (items || []).forEach(it => {
+      if (have.has(it.key)) { duplicates++; return; }
+      have.add(it.key);
+      out.push({
+        id: safeId(it.key),
+        icsKey: it.key,
+        title: it.title,
+        time: it.time,
+        plannedStart: it.date + 'T' + it.time + ':00',
+        plannedZone: 'America/Sao_Paulo',
+        plannedMinutes: it.plannedMinutes,
+        goalId: null,
+        stepId: null,
+        effort: it.plannedMinutes >= 60 ? 'G' : (it.plannedMinutes >= 30 ? 'M' : 'P'),
+        reward: it.plannedMinutes >= 60 ? 20 : (it.plannedMinutes >= 30 ? 10 : 5),
+        estimatedDuration: it.plannedMinutes,
+        recurrence: 'Data específica',
+        maxRuns: 0,
+        completedRuns: 0,
+        notes: '',
+        date: it.date,
+        state: 'pending',
+        delayMin: 0
+      });
+    });
+    return { occurrences: out, duplicates };
+  }
+
+  return { parseIcs, importFromIcs, toOccurrences, safeId, parseDateValue };
+});
+
+</script>
+  <script>
+/**
+ * reminder-planner.js
+ * Decide quais avisos nativos agendar para compromissos e prazos de metas.
+ *
+ * Motor puro: não lê relógio nem DOM. Quem chama informa nowMs e, se quiser,
+ * uma função makeLocalDate para respeitar um relógio injetado.
+ *
+ * Regras:
+ * - Cada compromisso usa a PRÓPRIA data (o.date) e hora. Antes, o app agendava tudo para hoje,
+ *   então compromissos de outros dias nunca avisavam no dia certo, e os de hoje só avisavam
+ *   se o app fosse aberto naquele dia.
+ * - Só agenda o que cai dentro da janela de horizonDays e só estados pendentes.
+ * - O resultado tem no máximo maxAlarms avisos, os mais próximos primeiro.
+ */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) {
+    module.exports = factory();
+  } else {
+    root.CatLineReminderPlanner = factory();
+  }
+})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+  'use strict';
+
+  const HOUR = 3600000;
+  const MIN = 60000;
+  const DEFAULTS = { horizonDays: 7, maxAlarms: 160 };
+
+  function parseTime(t) {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(t == null ? '' : t).trim());
+    if (!m) return null;
+    const h = Number(m[1]), mi = Number(m[2]);
+    if (h > 23 || mi > 59) return null;
+    return { h, mi };
+  }
+
+  function parseDay(s) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s == null ? '' : s));
+    if (!m) return null;
+    return { y: Number(m[1]), mo: Number(m[2]), d: Number(m[3]) };
+  }
+
+  function defaultMakeLocalDate(y, mo, d, h, mi) {
+    return new Date(y, mo - 1, d, h, mi, 0, 0).getTime();
+  }
+
+  function isPending(state) {
+    const st = String(state == null ? 'pending' : state).toLowerCase();
+    return st === 'pending' || st === 'pendente';
+  }
+
+  function cleanTitle(t) {
+    return String(t == null ? '' : t).replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 60) || 'Compromisso';
+  }
+
+  function pad(n) { return String(n).padStart(2, '0'); }
+
+  /**
+   * input: { occurrences, goals, dayKey, nowMs }
+   * opts: { horizonDays, maxAlarms, makeLocalDate }
+   * Retorna { items, ids } com items = [{ id, title, time, at, kind, color }] e ids = ids que devem ter aviso.
+   */
+  function planReminders(input, opts) {
+    const o = Object.assign({}, DEFAULTS, opts || {});
+    const makeLocalDate = o.makeLocalDate || defaultMakeLocalDate;
+    const nowMs = input.nowMs;
+    const limitMs = nowMs + o.horizonDays * 24 * HOUR;
+    const goalsById = new Map((input.goals || []).filter(Boolean).map(g => [g.id, g]));
+    const items = [];
+
+    const push = (id, title, time, at, kind, color) => {
+      if (at <= nowMs || at > limitMs) return;
+      items.push({ id, title, time, at, kind, color });
+    };
+
+    (input.occurrences || []).forEach(occ => {
+      if (!occ || occ.id == null || !isPending(occ.state)) return;
+      const t = parseTime(occ.time);
+      if (!t) return;
+      const day = parseDay(occ.date) || parseDay(input.dayKey);
+      if (!day) return;
+      const at = makeLocalDate(day.y, day.mo, day.d, t.h, t.mi);
+      const goal = occ.goalId ? goalsById.get(occ.goalId) : null;
+      const color = (goal && (goal.yarnColorId || goal.yarnColor)) || 'pink';
+      const title = cleanTitle(occ.title);
+      const time = pad(t.h) + ':' + pad(t.mi);
+      push(String(occ.id), title, time, at - HOUR, 'PRE_HOUR', color);
+      push(String(occ.id), title, time, at, 'NOW', color);
+      push(String(occ.id), title, time, at + 15 * MIN, 'OVERDUE', color);
+    });
+
+    (input.goals || []).forEach(g => {
+      if (!g || g.archived || g.progress >= 1 || !(g.remainingSeconds > 0)) return;
+      const deadline = nowMs + g.remainingSeconds * 1000;
+      const d = new Date(deadline);
+      const time = pad(d.getHours()) + ':' + pad(d.getMinutes());
+      const color = g.yarnColorId || g.yarnColor || 'pink';
+      const id = 'goal-' + g.id;
+      const title = cleanTitle(g.title);
+      push(id, title, time, deadline - 24 * HOUR, 'PRE_DAY', color);
+      push(id, title, time, deadline - HOUR, 'PRE_HOUR', color);
+      push(id, title, time, deadline, 'NOW', color);
+      push(id, title, time, deadline + HOUR, 'OVERDUE', color);
+    });
+
+    items.sort((a, b) => a.at - b.at);
+    if (items.length > o.maxAlarms) items.length = o.maxAlarms;
+    return { items, ids: Array.from(new Set(items.map(i => i.id))) };
+  }
+
+  /**
+   * Compara o plano novo com o que já foi enviado ao Android.
+   * previous e next são Maps de "id|kind" para assinatura. Retorna o que cancelar e o que agendar.
+   * Quando qualquer estágio de um id muda, o id inteiro é cancelado e reagendado, porque o Android
+   * só cancela por id.
+   */
+  function diffPlans(previousItems, nextItems) {
+    const sig = i => i.at + '|' + i.title + '|' + i.time + '|' + i.color;
+    const group = list => {
+      const map = new Map();
+      list.forEach(i => {
+        if (!map.has(i.id)) map.set(i.id, new Map());
+        map.get(i.id).set(i.kind, sig(i));
+      });
+      return map;
+    };
+    const prev = group(previousItems || []);
+    const next = group(nextItems || []);
+    const cancel = [];
+    const schedule = [];
+    const changed = new Set();
+
+    prev.forEach((kinds, id) => {
+      if (!next.has(id)) { cancel.push(id); return; }
+      const nk = next.get(id);
+      const same = kinds.size === nk.size && Array.from(kinds).every(([k, s]) => nk.get(k) === s);
+      if (!same) { cancel.push(id); changed.add(id); }
+    });
+    (nextItems || []).forEach(i => {
+      if (!prev.has(i.id) || changed.has(i.id)) schedule.push(i);
+    });
+    return { cancel, schedule };
+  }
+
+  return { planReminders, diffPlans, parseTime, parseDay };
+});
+
+</script>
+  <script>
+/**
  * Cat Line — Web Preview Emulator (Fidelidade Pixel Art 8-Bit)
  * Inclui:
  * - Provedor centralizado de relógio determinístico (Clock)
@@ -4775,6 +5621,48 @@ body.dark-mode .weekly-stat-card {
  * - Novelo que vai se enrolando à medida que o tempo da meta esgota
  * - Cada meta com um novelinho de cor diferente que muda na mão da gatinha ao ser selecionado
  */
+
+// Escapa texto digitado pela usuaria antes de colocar em innerHTML (evita injecao de HTML/JS na ponte nativa).
+function escHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+if (typeof window !== 'undefined') window.escHtml = escHtml;
+
+// Seletor de arquivos nativo do Android (ponte AndroidFiles). Fora do APK, os botões usam o input do navegador.
+const NativeFiles = {
+  _pending: {},
+  _seq: 0,
+  available() {
+    return typeof window !== 'undefined' && !!window.AndroidFiles
+      && typeof window.AndroidFiles.pickTextFile === 'function';
+  },
+  _request(start) {
+    return new Promise((resolve, reject) => {
+      const token = 'f' + (++this._seq) + '_' + Math.random().toString(36).slice(2, 8);
+      this._pending[token] = { resolve, reject };
+      try { start(token); } catch (err) { delete this._pending[token]; reject(err); }
+    });
+  },
+  pickText() {
+    return this._request(token => window.AndroidFiles.pickTextFile(token));
+  },
+  saveText(fileName, mime, text) {
+    return this._request(token => window.AndroidFiles.saveTextFile(token, fileName, mime, text));
+  },
+  // Chamado pelo Java: window.CatLineNative.onResult({ token, ok, name, text, error })
+  onResult(res) {
+    const p = res && this._pending[res.token];
+    if (!p) return;
+    delete this._pending[res.token];
+    if (res.ok) p.resolve(res); else p.reject(new Error(res.error || 'failed'));
+  }
+};
+if (typeof window !== 'undefined') window.CatLineNative = NativeFiles;
 
 // Provedor centralizado de relógio determinístico (clock.js)
 const _clockImpl = (typeof CatLineClock !== 'undefined')
@@ -5587,7 +6475,8 @@ const betaReportEngine = {
         foco: Boolean(st.flags && (st.flags.FOCO !== false && st.flags.foco !== false)),
         metasPassos: Boolean(st.flags && st.flags.METAS_PASSOS !== false),
         compromissos: Boolean(st.flags && st.flags.COMPROMISSOS !== false),
-        logSemanal: Boolean(st.flags && st.flags.LOG_SEMANAL !== false)
+        logSemanal: Boolean(st.flags && st.flags.LOG_SEMANAL !== false),
+        humor: Boolean(st.flags && st.flags.HUMOR !== false)
       },
       telemetry: {
         occurrencesTotal: totalTasks,
@@ -5789,7 +6678,8 @@ const state = {
     NOVELO_GRACINHAS: true,
     METAS_PASSOS: true,
     COMPROMISSOS: true,
-    LOG_SEMANAL: true
+    LOG_SEMANAL: true,
+    HUMOR: true
   },
   set moduleFlags(flags) {
     if (flags && typeof flags === 'object') {
@@ -5827,6 +6717,7 @@ const state = {
   rewardEvents: [],
   dayClosures: [],
   weeklyLogs: [],
+  moodLog: [],
   scheduledStepPreFill: null,
   editingStepId: null,
   activeStepPrompt: null,
@@ -6200,8 +7091,43 @@ function syncNativeBlocker() {
   } catch (e) {}
 }
 
+// Resumo do dia para o widget da tela inicial. Só envia quando algo mudou.
+let _lastWidgetJson = '';
+function syncWidgetSnapshot() {
+  try {
+    if (typeof window === 'undefined' || !window.AndroidWidget || typeof window.AndroidWidget.updateWidget !== 'function') return;
+    const today = (state.occurrences || []).filter(o => o && o.date === state.dayKey && o.state !== 'rescheduled');
+    const isDone = o => o.state === 'done' || o.state === 'FEITO';
+    const pending = today
+      .filter(o => !isDone(o) && o.state !== 'missed')
+      .sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')));
+    const json = JSON.stringify({
+      day: state.dayKey,
+      doneToday: today.filter(isDone).length,
+      totalToday: today.length,
+      items: pending.slice(0, 3).map(o => ({ id: String(o.id), title: String(o.title || '').slice(0, 40), time: String(o.time || ''), color: 'pink' }))
+    });
+    if (json === _lastWidgetJson) return;
+    _lastWidgetJson = json;
+    window.AndroidWidget.updateWidget(json);
+  } catch (e) {}
+}
+
+// Reagenda os avisos nativos depois de salvar, sem esperar o app voltar para a tela.
+let _reminderSyncTimer = null;
+function scheduleReminderSync() {
+  if (typeof window === 'undefined' || !window.AndroidBlocker || !window.app) return;
+  if (_reminderSyncTimer) clearTimeout(_reminderSyncTimer);
+  _reminderSyncTimer = setTimeout(() => {
+    _reminderSyncTimer = null;
+    try { window.app.syncNativeReminders(); } catch (e) {}
+  }, 800);
+}
+
 function saveStateToDeviceStorage() {
   syncNativeBlocker();
+  syncWidgetSnapshot();
+  scheduleReminderSync();
   try {
     const toSave = {
       schemaVersion: 2,
@@ -6224,6 +7150,7 @@ function saveStateToDeviceStorage() {
       rewardEvents: state.rewardEvents || [],
       dayClosures: state.dayClosures || [],
       weeklyLogs: state.weeklyLogs || [],
+      moodLog: state.moodLog || [],
       habits: state.habits,
       goals: state.goals,
       briefing: state.briefing,
@@ -6246,7 +7173,12 @@ function saveStateToDeviceStorage() {
       largeFont: state.largeFont,
       notificationsEnabled: state.notificationsEnabled
     };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+    const serialized = JSON.stringify(toSave);
+    localStorage.setItem(STORAGE_KEY, serialized);
+    // Espelhamento redundante no cofre nativo do Android (evita perda entre atualizacoes de APK)
+    if (window.AndroidBlocker && typeof window.AndroidBlocker.putSecret === 'function') {
+      try { window.AndroidBlocker.putSecret('catline_backup_state', serialized); } catch (e) {}
+    }
   } catch (err) {
     console.warn('Cat Line: aviso ao salvar na memória do celular:', err);
   }
@@ -6254,7 +7186,18 @@ function saveStateToDeviceStorage() {
 
 function loadStateFromDeviceStorage() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    let raw = localStorage.getItem(STORAGE_KEY);
+    // Se o localStorage da WebView vier vazio (ex: atualizacao ou limpeza de cache), restaura do cofre nativo
+    if (!raw && window.AndroidBlocker && typeof window.AndroidBlocker.getSecret === 'function') {
+      try {
+        const vaultState = window.AndroidBlocker.getSecret('catline_backup_state');
+        if (vaultState && vaultState.length > 10) {
+          raw = vaultState;
+          localStorage.setItem(STORAGE_KEY, vaultState);
+          console.log('Cat Line: dados restaurados do cofre nativo do Android!');
+        }
+      } catch (e) {}
+    }
     if (!raw) return;
     let data = JSON.parse(raw);
 
@@ -6268,6 +7211,9 @@ function loadStateFromDeviceStorage() {
     if (Array.isArray(data.rewardEvents)) state.rewardEvents = data.rewardEvents;
     if (Array.isArray(data.dayClosures)) state.dayClosures = data.dayClosures;
     if (Array.isArray(data.weeklyLogs)) state.weeklyLogs = data.weeklyLogs;
+    if (Array.isArray(data.moodLog)) {
+      state.moodLog = (typeof CatLineMoodEngine !== 'undefined') ? CatLineMoodEngine.sanitizeLog(data.moodLog) : data.moodLog;
+    }
 
     if (data.currencies) state.currencies = { ...state.currencies, ...data.currencies };
     if (data.selectedGoalId) state.selectedGoalId = data.selectedGoalId;
@@ -6377,6 +7323,9 @@ function loadStateFromDeviceStorage() {
 function clearDeviceStorageAndReset() {
   if (confirm("Deseja apagar os dados salvos na memória deste celular e reiniciar o Cat Line do zero?")) {
     localStorage.removeItem(STORAGE_KEY);
+    if (window.AndroidBlocker && typeof window.AndroidBlocker.removeSecret === 'function') {
+      try { window.AndroidBlocker.removeSecret('catline_backup_state'); } catch (e) {}
+    }
     window.location.reload();
   }
 }
@@ -7192,7 +8141,9 @@ class AppUI {
     this.startReminderCheckerLoop();
     syncNativeBlocker();
     this.checkNativeCompletedTasks();
+    this.autoEnableNativeNotifications();
     this.syncNativeReminders();
+    this.checkAppUpdate();
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) {
         this.checkNativeCompletedTasks();
@@ -7322,6 +8273,7 @@ class AppUI {
       { key: 'METAS_PASSOS', label: 'Metas com Passos' },
       { key: 'COMPROMISSOS', label: 'Compromissos & Check-in' },
       { key: 'LOG_SEMANAL', label: 'Log Semanal & Carta' },
+      { key: 'HUMOR', label: 'Humor do Dia' },
       { key: 'INSIGHTS', label: 'O Fio & Insights' },
       { key: 'LOJA', label: 'Lojinha & Cosméticos' },
       { key: 'CONVERSA', label: 'Chat & Diálogo' },
@@ -7435,11 +8387,22 @@ class AppUI {
     const woundPct = Math.round(getWoundFractionByTime(selectedGoal) * 100);
 
     this.contentEl.innerHTML = `
+      ${state.availableUpdate ? `
+        <div class="pixel-card cream" style="border-left: 5px solid #27ae60; margin-bottom: 10px; padding: 10px 12px; display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+          <span style="font-size: 13px;">🆕 Versão <strong>v${state.availableUpdate.version}</strong> disponível!</span>
+          <div style="display: flex; gap: 6px;">
+            <a href="${state.availableUpdate.url}" target="_blank" class="pixel-btn btn-sm btn-green" style="text-decoration:none;">Atualizar</a>
+            <button class="pixel-btn btn-sm btn-secondary" onclick="window.app.dismissUpdateBanner()">✕</button>
+          </div>
+        </div>
+      ` : ''}
       <!-- Balão de Fala com a Gatinha -->
       <div class="speech-bubble-container">
-        <div class="speech-bubble-box" id="speech-bubble-text">${state.cat.speechText}</div>
+        <div class="speech-bubble-box" id="speech-bubble-text">${escHtml(state.cat.speechText)}</div>
         <div class="speech-bubble-tail"></div>
       </div>
+
+      ${this.renderMoodCardHtml()}
 
       <!-- Banner Dinâmico: Espelho da Rotina da Cliente -->
       ${(() => {
@@ -7469,7 +8432,7 @@ class AppUI {
               <div class="mobile-stack-info">
                 <span style="font-size: 11px; font-weight: 700; color: ${activeObj ? PALETTE.leafGreen : PALETTE.orange}; letter-spacing: 0.5px;">⚡ FAZENDO AGORA COM A GATINHA:</span>
                 <div style="font-size: 16px; font-weight: 700; color: ${PALETTE.ink}; margin-top: 2px; line-height: 1.25;">
-                  ${activeObj ? activeObj.title : "Nenhuma tarefa em execução manual"}
+                  ${activeObj ? escHtml(activeObj.title) : "Nenhuma tarefa em execução manual"}
                 </div>
                 <span style="font-size: 13px; color: ${PALETTE.cozyPurple}; font-weight: 700; display: block; margin-top: 2px;">
                   ${statusLabel}
@@ -7526,7 +8489,7 @@ class AppUI {
             return `
               <button class="yarn-chip ${isSel ? 'selected' : ''}" onclick="window.app.selectGoalYarn('${g.id}')">
                 <canvas class="yarn-color-dot mini-yarn-canvas" width="22" height="22" data-color="${g.yarnColorId}"></canvas>
-                <span>${g.title}</span>
+                <span>${escHtml(g.title)}</span>
               </button>
             `;
           }).join('')}
@@ -7558,7 +8521,10 @@ class AppUI {
               <h4 style="margin-bottom: 2px;">⏳ Linha do Tempo de Hoje · ${state.occurrences.filter(o => o.state === 'FEITO').length + state.habits.filter(h => h.completed).length} de ${state.occurrences.length + state.habits.length} feitos</h4>
               <span style="font-size: 12px; color: ${PALETTE.grayDark};">Compromissos e Hábitos ordenados por horário</span>
             </div>
-            <button class="pixel-btn btn-sm btn-green" style="flex-shrink: 0;" onclick="window.app.openQuickCreateSheet('occurrence')">＋ Criar</button>
+            <div style="display: flex; gap: 6px; flex-shrink: 0;">
+              <button class="pixel-btn btn-sm btn-gold" onclick="window.app.openQuickCreateSheet('once')" title="Atividade que só vai fazer 1 ou 2 vezes">⚡ Avulsa</button>
+              <button class="pixel-btn btn-sm btn-green" onclick="window.app.openQuickCreateSheet('occurrence')">＋ Criar</button>
+            </div>
           </div>
         </div>
 
@@ -7626,7 +8592,7 @@ class AppUI {
             </div>
 
             <p style="font-size: 14px; color: ${PALETTE.ink}; margin: 6px 0;">
-              Tarefa: <strong>${activeTitle}</strong>
+              Tarefa: <strong>${escHtml(activeTitle)}</strong>
             </p>
             <span style="font-size: 12px; color: ${PALETTE.grayDark};">A gatinha está concentrada no quarto puxando o fio com você!</span>
 
@@ -7886,8 +8852,6 @@ class AppUI {
     if (goal) {
       if (typeof goalStepEngine !== 'undefined' && goalStepEngine && typeof goalStepEngine.completeStep === 'function') {
         goalStepEngine.completeStep(goal, stepId);
-      } else if (typeof goalStepEngine !== 'undefined' && goalStepEngine && typeof goalStepEngine.toggleStepDone === 'function') {
-        goalStepEngine.toggleStepDone(goal, stepId);
       } else {
         const step = (goal.steps || []).find(s => s.id === stepId);
         if (step) {
@@ -8125,7 +9089,7 @@ class AppUI {
             <p style="font-size: 14px; color: ${PALETTE.ink}; margin: 8px 0; line-height: 1.4;">
               Esse passo da meta foi concluído?
               <br>
-              <strong style="color: ${PALETTE.orange}; font-size: 15px;">${p.stepTitle}</strong>
+              <strong style="color: ${PALETTE.orange}; font-size: 15px;">${escHtml(p.stepTitle)}</strong>
             </p>
             <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 14px;">
               <button class="pixel-btn btn-green" style="width: 100%; min-height: 48px; font-size: 14px;" onclick="window.app.confirmStepDoneFromCommitment('${p.goalId}', '${p.stepId}')">
@@ -8155,7 +9119,7 @@ class AppUI {
             <div style="font-size: 28px; margin-bottom: 6px;">🕒🐾</div>
             <h3 style="font-size: 16px; margin: 0 0 6px 0; color: ${PALETTE.cozyPurple};">Check-in Retroativo</h3>
             <p style="font-size: 13px; color: ${PALETTE.ink}; margin: 6px 0;">
-              Que horas você cumpriu <strong>${r.title}</strong>?
+              Que horas você cumpriu <strong>${escHtml(r.title)}</strong>?
             </p>
             <div style="margin: 12px 0;">
               <input type="time" id="retro-checkin-time-input" class="pixel-input" value="${r.time}" style="font-size: 16px; padding: 8px; text-align: center; width: 140px;">
@@ -8188,7 +9152,7 @@ class AppUI {
             <div style="font-size: 28px; margin-bottom: 6px;">🗓️🐾</div>
             <h3 style="font-size: 16px; margin: 0 0 6px 0; color: ${PALETTE.orange};">Remarcar Compromisso</h3>
             <p style="font-size: 13px; color: ${PALETTE.ink}; margin: 6px 0;">
-              Escolha o novo momento para <strong>${s.title}</strong>:
+              Escolha o novo momento para <strong>${escHtml(s.title)}</strong>:
             </p>
             <div style="display: flex; gap: 8px; margin: 12px 0; justify-content: center;">
               <input type="date" id="reschedule-date-input" class="pixel-input" value="${s.newDate}" style="font-size: 14px; padding: 6px;">
@@ -8595,7 +9559,7 @@ class AppUI {
               ${unresolvedList.map(item => `
                 <div class="closure-task-card" id="closure-item-${item.id}">
                   <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                    <strong style="font-size: 14px; color: ${PALETTE.ink};">${item.title}</strong>
+                    <strong style="font-size: 14px; color: ${PALETTE.ink};">${escHtml(item.title)}</strong>
                     <span style="font-size: 12px; font-weight: 700; color: #666;">Planejado: ${item.time || '12:00'}</span>
                   </div>
                   <div style="display: flex; align-items: center; gap: 6px;">
@@ -8654,7 +9618,34 @@ class AppUI {
   markDone(id) {
     this.checkInLive(id);
     const occ = state.occurrences.find(o => o.id === id);
-    if (occ) occ.state = 'FEITO';
+    if (occ) {
+      occ.state = 'FEITO';
+      const maxRuns = occ.maxRuns || (occ.recurrence === 'Pontual · 2 vezes' ? 2 : (occ.recurrence === 'Pontual · 1 vez' ? 1 : 0));
+      if (maxRuns > 0) {
+        occ.maxRuns = maxRuns;
+        occ.completedRuns = (occ.completedRuns || 0) + 1;
+        if (occ.completedRuns >= maxRuns) {
+          occ.completedAllRuns = true;
+          this.setCatSpeech(`Prontinho! "${occ.title}" (${occ.completedRuns}/${maxRuns}) finalizada de vez!`);
+        } else {
+          this.setCatSpeech(`Boa! "${occ.title}" ${occ.completedRuns}/${maxRuns} feita — falta só mais 1 vez!`);
+        }
+        this.persist();
+        this.renderActiveTab();
+      }
+    }
+  }
+
+  reopenSecondRun(id) {
+    const occ = state.occurrences.find(o => o.id === id);
+    if (!occ) return;
+    occ.state = 'pending';
+    occ.completedAllRuns = false;
+    audio.playBlip();
+    this.setCatSpeech(`Bora para a ${Math.min((occ.completedRuns || 1) + 1, occ.maxRuns || 2)}ª vez de "${occ.title}"!`);
+    this.persist();
+    this.renderActiveTab();
+    this.syncNativeReminders();
   }
 
   retroCheckIn(id) {
@@ -8844,7 +9835,7 @@ class AppUI {
               <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 4px;">
                 ${s.goals.map(g => `
                   <div style="background: #ffffff; border: 1.5px solid ${PALETTE.ink}; border-radius: 4px; padding: 6px; font-size: 12px; display: flex; justify-content: space-between;">
-                    <span>${g.title}</span>
+                    <span>${escHtml(g.title)}</span>
                     <strong>${g.stepsDoneThisWeek} passos concluídos</strong>
                   </div>
                 `).join('')}
@@ -8864,7 +9855,7 @@ class AppUI {
               <span style="font-size: 18px;">🐱💌</span>
               <strong style="color: ${PALETTE.cozyPurple}; font-size: 13px;">Carta da Gatinha:</strong>
             </div>
-            <p style="margin: 0;">${s.letter.renderedText}</p>
+            <p style="margin: 0;">${escHtml(s.letter.renderedText)}</p>
           </div>
 
           <!-- Sugestão Gentil de Horário -->
@@ -8872,7 +9863,7 @@ class AppUI {
             <div style="background: #f0f7ff; border: 2px solid ${PALETTE.windowBlue}; border-radius: 4px; padding: 10px; margin: 10px 0;">
               <strong style="color: ${PALETTE.windowBlue}; font-size: 13px; display: block; margin-bottom: 4px;">💡 Sugestão Gentil de Ritmo:</strong>
               <p style="font-size: 12px; margin: 0 0 8px 0; color: ${PALETTE.ink};">
-                Parece que você tendeu a cumprir <strong>${s.gentleSuggestion.commitmentTitle}</strong> com cerca de ${s.gentleSuggestion.medianLateMinutes} minutos de flexibilidade. Que tal ajustar para <strong>${s.gentleSuggestion.proposedNewTime}</strong>?
+                Parece que você tendeu a cumprir <strong>${escHtml(s.gentleSuggestion.commitmentTitle)}</strong> com cerca de ${s.gentleSuggestion.medianLateMinutes} minutos de flexibilidade. Que tal ajustar para <strong>${s.gentleSuggestion.proposedNewTime}</strong>?
               </p>
               <button class="pixel-btn btn-gold" style="width: 100%; min-height: 48px; font-size: 13px;" onclick="window.app.acceptGentleSuggestion('${s.gentleSuggestion.commitmentId}', '${s.gentleSuggestion.proposedNewTime}')">
                 ✓ Aceitar sugestão de horário
@@ -8959,7 +9950,7 @@ class AppUI {
           <div style="flex: 1;">
             <strong style="color: #6c3483; font-size: 15px; display: block; margin-bottom: 4px;">Dica de Calibração da Gatinha</strong>
             <p style="font-size: 13px; color: ${PALETTE.ink}; margin: 0 0 10px 0; line-height: 1.4;">
-              ${sug.text}
+              ${escHtml(sug.text)}
             </p>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
               <button class="pixel-btn btn-sm btn-green" onclick="window.app.acceptCalibration()">Aceitar Ajuste ✓</button>
@@ -9019,7 +10010,7 @@ class AppUI {
           <div style="flex: 1;">
             <strong style="color: #6c3483; font-size: 15px; display: block; margin-bottom: 4px;">Acolhimento da Gatinha · Replanejamento</strong>
             <p style="font-size: 13px; color: ${PALETTE.ink}; margin: 0 0 10px 0; line-height: 1.4;">
-              ${plan.text}
+              ${escHtml(plan.text)}
             </p>
             <div style="background: #fff; border: 1px dashed #8e44ad; border-radius: 4px; padding: 8px; margin-bottom: 10px; font-size: 13px;">
               <strong style="color: #6c3483;">Proposta para amanhã:</strong>
@@ -9297,6 +10288,121 @@ class AppUI {
     this.renderActiveTab();
   }
 
+  dismissUpdateBanner() {
+    state.availableUpdate = null;
+    this.renderActiveTab();
+  }
+
+  // Check-in de humor diário (módulo HUMOR, AD-11)
+  renderMoodCardHtml() {
+    if (state.flags.HUMOR === false || typeof CatLineMoodEngine === 'undefined') return '';
+    const today = CatLineMoodEngine.getMoodForDay(state.moodLog, state.dayKey);
+    const buttons = CatLineMoodEngine.LEVELS.map(l => {
+      const selected = today && today.level === l.level;
+      return `
+        <button class="pixel-btn btn-sm ${selected ? 'btn-green' : 'btn-secondary'}" style="flex: 1; min-width: 0; padding: 6px 2px; display: flex; flex-direction: column; align-items: center; gap: 2px;"
+          onclick="window.app.setMood(${l.level})" aria-label="${escHtml(l.label)}" aria-pressed="${selected ? 'true' : 'false'}">
+          <span style="font-size: 22px; line-height: 1;">${l.emoji}</span>
+          <span style="font-size: 10px; line-height: 1.1;">${escHtml(l.label)}</span>
+        </button>`;
+    }).join('');
+
+    const insight = CatLineMoodEngine.moodInsight(state.moodLog, state.occurrences, state.dayKey);
+    let insightHtml = '';
+    if (insight.status === 'observando' && insight.daysCollected > 0) {
+      insightHtml = `<div style="font-size: 12px; color: ${PALETTE.grayDark}; margin-top: 6px;">🐾 Estamos nos conhecendo melhor: ${insight.daysCollected} de ${insight.daysNeeded} dias de humor.</div>`;
+    } else if (insight.status === 'ok') {
+      insightHtml = `<div style="font-size: 12px; color: ${PALETTE.cozyPurple}; margin-top: 6px; line-height: 1.35;">💜 ${escHtml(insight.message)}</div>`;
+    }
+
+    return `
+      <div class="pixel-card cream" style="margin-bottom: 8px; padding: 10px 12px;">
+        <div style="font-size: 13px; font-weight: 700; color: ${PALETTE.ink}; margin-bottom: 6px;">
+          ${today ? 'Seu humor de hoje' : 'Como você está hoje?'}
+        </div>
+        <div style="display: flex; gap: 4px;">${buttons}</div>
+        ${insightHtml}
+      </div>`;
+  }
+
+  setMood(level) {
+    if (typeof CatLineMoodEngine === 'undefined' || state.flags.HUMOR === false) return;
+    try {
+      state.moodLog = CatLineMoodEngine.recordMood(state.moodLog, {
+        dayKey: state.dayKey,
+        level,
+        atIso: Clock.isoString()
+      });
+    } catch (e) {
+      return;
+    }
+    const info = CatLineMoodEngine.levelInfo(level);
+    try { audio.playBlip(); } catch (e) {}
+    this.persist();
+    this.renderActiveTab();
+    if (info) this.setCatSpeech(info.speech);
+  }
+
+  selectAgendaDay(dayStr) {
+    state.agendaSelectedDay = dayStr;
+    audio.playBlip();
+    this.renderActiveTab();
+  }
+
+  hasTimeConflict(occ) {
+    const st = String(occ.state || 'pending').toLowerCase();
+    if (st === 'done' || st === 'feito') return false;
+    const toMin = (hhmm) => {
+      const [h, m] = String(hhmm || '00:00').split(':').map(Number);
+      return (isNaN(h) ? 0 : h) * 60 + (isNaN(m) ? 0 : m);
+    };
+    const startA = toMin(occ.time);
+    const endA = startA + (occ.estimatedDuration || occ.plannedMinutes || 30);
+    const dayA = occ.date || state.dayKey;
+    return (state.occurrences || []).some(other => {
+      if (other.id === occ.id) return false;
+      const ost = String(other.state || 'pending').toLowerCase();
+      if (ost === 'done' || ost === 'feito') return false;
+      const dayB = other.date || state.dayKey;
+      if (dayA !== dayB) return false;
+      const startB = toMin(other.time);
+      const endB = startB + (other.estimatedDuration || other.plannedMinutes || 30);
+      return startA < endB && startB < endA;
+    });
+  }
+
+  renderAgendaWeekStrip(selectedDay) {
+    const base = Clock.newDate(state.dayKey + 'T12:00:00');
+    const dow = (base.getDay() + 6) % 7; // Seg=0 .. Dom=6
+    const monday = Clock.newDate(base.getTime() - dow * 86400000);
+    const labels = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+    const cells = [];
+    for (let i = 0; i < 7; i++) {
+      const d = Clock.newDate(monday.getTime() + i * 86400000);
+      const iso = d.toISOString().slice(0, 10);
+      const dayOccs = (state.occurrences || []).filter(o => (o.date || state.dayKey) === iso || (!o.date && iso === state.dayKey));
+      const mins = dayOccs.reduce((acc, o) => acc + (o.estimatedDuration || o.plannedMinutes || 30), 0);
+      const isSel = iso === selectedDay;
+      const isToday = iso === state.dayKey;
+      cells.push(`
+        <button onclick="window.app.selectAgendaDay('${iso}')" style="flex:1; min-width:42px; padding:6px 4px; border-radius:8px; border:2px solid ${isSel ? PALETTE.cozyPurple : '#d5d8dc'}; background:${isSel ? '#f3ecff' : '#fff'}; cursor:pointer; text-align:center;">
+          <div style="font-size:11px; font-weight:700; color:${isToday ? '#e67e22' : PALETTE.grayDark};">${labels[i]}</div>
+          <div style="font-size:13px; font-weight:800; color:${PALETTE.ink};">${iso.slice(8, 10)}</div>
+          <div style="font-size:10px; color:${PALETTE.cozyPurple};">${dayOccs.length} · ${mins}m</div>
+        </button>
+      `);
+    }
+    return `
+      <div class="pixel-card cream" style="margin-bottom: 10px; padding: 10px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <strong style="font-size:13px;">🗓️ Visão da Semana</strong>
+          <span style="font-size:11px; color:${PALETTE.grayDark};">Toque no dia para ver ou agendar</span>
+        </div>
+        <div style="display:flex; gap:4px; overflow-x:auto;">${cells.join('')}</div>
+      </div>
+    `;
+  }
+
   saveEditOccurrence(id) {
     const occ = state.occurrences.find(o => o.id === id);
     if (!occ) return;
@@ -9313,7 +10419,12 @@ class AppUI {
     }
     const durEl = document.getElementById(`edit-occ-duration-${id}`);
     if (durEl && durEl.value) occ.estimatedDuration = parseInt(durEl.value, 10);
-    if (recurrenceEl) occ.recurrence = recurrenceEl.value;
+    if (recurrenceEl) {
+      occ.recurrence = recurrenceEl.value;
+      occ.maxRuns = occ.recurrence === 'Pontual · 2 vezes' ? 2 : (occ.recurrence === 'Pontual · 1 vez' ? 1 : 0);
+    }
+    const notesEl = document.getElementById(`edit-occ-notes-${id}`);
+    if (notesEl) occ.notes = notesEl.value.trim();
     if (dateEl && dateEl.value) occ.date = dateEl.value;
     state.editingOccurrenceId = null;
     audio.playMeowGreeting();
@@ -9336,7 +10447,8 @@ class AppUI {
   }
 
   renderTabAgenda() {
-    const workload = replanEngine.calculateDailyWorkload(state.occurrences, state.dayKey);
+    const selDay = state.agendaSelectedDay || state.dayKey;
+    const workload = replanEngine.calculateDailyWorkload(state.occurrences, selDay);
     const capacity = replanEngine.getDailyCapacity(state.briefing);
     const isOver = workload.totalMinutes > capacity;
     const pct = Math.min(100, Math.round((workload.totalMinutes / capacity) * 100));
@@ -9346,18 +10458,27 @@ class AppUI {
     const initialDuration = pre && pre.estMinutes ? pre.estMinutes : 30;
 
     this.contentEl.innerHTML = `
+      ${this.renderAgendaWeekStrip(selDay)}
+      ${typeof CatLineIcsImport !== 'undefined' ? `
+        <div class="pixel-card cream" style="padding: 10px 12px; margin-bottom: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px; justify-content: space-between;">
+            <span style="font-size: 13px; line-height: 1.3;">📥 Já usa outra agenda? Traga seus compromissos de um arquivo de calendário.</span>
+            <button class="pixel-btn btn-sm btn-purple" style="min-height: 44px; white-space: nowrap;" onclick="window.app.triggerImportIcs()">Importar .ics</button>
+          </div>
+          <input type="file" id="ics-import-input" style="display: none;" accept=".ics,text/calendar" onchange="window.app.importIcsFile(event)">
+        </div>` : ''}
       <div class="pixel-card">
         <h4>📅 Agenda · Novo Compromisso</h4>
         <p style="font-size: 14px; color: ${PALETTE.grayDark}; margin-bottom: 10px;">Defina título, horário, esforço, duração estimada e frequência recorrente:</p>
         ${pre ? `
           <div style="background: #e8f8f5; padding: 6px 10px; border: 1px dashed #27ae60; font-size: 13px; margin-bottom: 8px;">
-            🧶 Agendando passo da meta: <strong>${pre.title}</strong>
+            🧶 Agendando passo da meta: <strong>${escHtml(pre.title)}</strong>
           </div>
         ` : ''}
         <div style="display: flex; flex-direction: column; gap: 10px;">
           <div class="flex-row">
             <span style="font-size: 20px;">🧶</span>
-            <input type="text" id="new-task-title" class="pixel-input" placeholder="Título do compromisso: Treino, Reunião, Estudo" value="${initialTitle}">
+            <input type="text" id="new-task-title" class="pixel-input" placeholder="Título do compromisso: Treino, Reunião, Estudo" value="${escHtml(initialTitle)}">
           </div>
           <div class="flex-row">
             <span style="font-size: 20px;">⏰</span>
@@ -9385,10 +10506,13 @@ class AppUI {
               <option value="3x por semana">✨ Recorrente · 3x por semana</option>
               <option value="Semanal">📆 Recorrente · Semanal uma vez por semana</option>
               <option value="Apenas hoje">📌 Pontual · Apenas hoje</option>
+              <option value="Pontual · 1 vez">⚡ Pontual · Só 1 vez</option>
+              <option value="Pontual · 2 vezes">⚡ Pontual · Só 2 vezes</option>
               <option value="Data específica">📅 Pontual · Data específica</option>
             </select>
-            <input type="date" id="new-task-date" class="pixel-input" value="${state.dayKey}" style="flex: 1; min-width: 120px;" title="Data do compromisso">
+            <input type="date" id="new-task-date" class="pixel-input" value="${selDay}" style="flex: 1; min-width: 120px;" title="Data do compromisso">
           </div>
+          <input type="text" id="new-task-notes" class="pixel-input" placeholder="📝 Notas / checklist rápido (opcional)">
           <button class="pixel-btn btn-green" onclick="window.app.addCommitment()">Enrolar na Agenda</button>
         </div>
       </div>
@@ -9423,7 +10547,7 @@ class AppUI {
               return `
                 <div class="inline-edit-box">
                   <strong>✏️ Editar Compromisso:</strong>
-                  <input type="text" id="edit-occ-title-${o.id}" class="pixel-input" value="${o.title}">
+                  <input type="text" id="edit-occ-title-${o.id}" class="pixel-input" value="${escHtml(o.title)}">
                   <div class="flex-row">
                     <input type="time" id="edit-occ-time-${o.id}" class="pixel-input" value="${o.time}">
                     <select id="edit-occ-effort-${o.id}" class="pixel-input">
@@ -9463,7 +10587,7 @@ class AppUI {
               <div class="mobile-stack-item" style="background: ${isDone ? '#e6f4ea' : '#fff'}; padding: 10px 12px; border: 2px solid ${PALETTE.ink}; font-size: 15px;">
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
                   <div style="flex: 1; min-width: 0;">
-                    <strong style="font-size: 16px; display: block; word-break: break-word;">${o.title}</strong>
+                    <strong style="font-size: 16px; display: block; word-break: break-word;">${escHtml(o.title)}</strong>
                     <span style="font-size: 13px; color: ${PALETTE.grayDark}; display: block; margin-top: 2px;">
                       ⏰ ${o.time} · ⏱️ ${o.estimatedDuration || (o.effort === 'G' ? 60 : (o.effort === 'M' ? 30 : 15))} min · Esforço ${o.effort} (+${o.reward}🐟) · <span style="color: ${PALETTE.cozyPurple}; font-weight: 700;">${rec}</span>
                     </span>
@@ -9514,12 +10638,15 @@ class AppUI {
     const estimatedDuration = durationEl ? parseInt(durationEl.value, 10) : (effort === 'G' ? 60 : (effort === 'M' ? 30 : 15));
     const recurrence = recurrenceEl ? recurrenceEl.value : 'Todos os dias';
     const date = dateEl && dateEl.value ? dateEl.value : state.dayKey;
+    const notesEl = document.getElementById('new-task-notes');
+    const notes = notesEl ? notesEl.value.trim() : '';
     if (!title) return;
 
     const reward = effort === 'G' ? 20 : (effort === 'M' ? 10 : 5);
     const pre = state.scheduledStepPreFill;
     const goalId = pre ? pre.goalId : null;
     const stepId = pre ? pre.stepId : null;
+    const maxRuns = recurrence === 'Pontual · 2 vezes' ? 2 : (recurrence === 'Pontual · 1 vez' ? 1 : 0);
 
     state.occurrences.push({
       id: `occ-${Clock.now()}`,
@@ -9535,6 +10662,9 @@ class AppUI {
       reward,
       estimatedDuration,
       recurrence,
+      maxRuns,
+      completedRuns: 0,
+      notes,
       date,
       state: 'pending',
       delayMin: 0
@@ -9546,6 +10676,65 @@ class AppUI {
     this.setCatSpeech(`Compromisso "${title}" adicionado.`);
     this.renderActiveTab();
     this.persist();
+  }
+
+  // Importação de calendário .ics, 100% local. Nada é salvo sem confirmação.
+  triggerImportIcs() {
+    if (NativeFiles.available()) {
+      NativeFiles.pickText()
+        .then(res => this.applyIcsText(res.text))
+        .catch(err => {
+          if (err && err.message === 'cancelled') return;
+          alert('Não consegui abrir esse arquivo. Tente escolher outro.');
+        });
+      return;
+    }
+    const input = document.getElementById('ics-import-input');
+    if (input) input.click();
+  }
+
+  importIcsFile(event) {
+    const input = event && event.target;
+    const file = input && input.files && input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try { this.applyIcsText(String(e.target.result || '')); } finally { if (input) input.value = ''; }
+    };
+    reader.readAsText(file);
+  }
+
+  applyIcsText(text) {
+      try {
+        const horizonDays = 60;
+        const parsed = CatLineIcsImport.importFromIcs(String(text || ''), { fromDayKey: state.dayKey, horizonDays });
+        const conv = CatLineIcsImport.toOccurrences(parsed.items, state.occurrences);
+        const s = parsed.summary;
+        if (s.events === 0) {
+          alert('Não encontrei compromissos nesse arquivo. Confira se ele é um calendário no formato .ics.');
+          return;
+        }
+        if (conv.occurrences.length === 0) {
+          alert(conv.duplicates > 0
+            ? 'Esses compromissos já estão na sua agenda. Nada foi repetido.'
+            : `Não há compromissos com horário nos próximos ${horizonDays} dias.`);
+          return;
+        }
+        let msg = `Encontrei ${conv.occurrences.length} compromissos nos próximos ${horizonDays} dias. Importar para a agenda?`;
+        if (conv.duplicates > 0) msg += `\n${conv.duplicates} já estavam na agenda e serão pulados.`;
+        if (s.skippedAllDay > 0) msg += `\n${s.skippedAllDay} eventos de dia inteiro ficam de fora.`;
+        if (s.truncated) msg += '\nO arquivo é grande, então importei só os primeiros 300.';
+        if (typeof confirm === 'function' && !confirm(msg)) return;
+
+        state.occurrences = state.occurrences.concat(conv.occurrences);
+        audio.playMeowCelebrate();
+        this.setCatSpeech(`Pronto! ${conv.occurrences.length} compromissos chegaram na sua agenda.`);
+        this.renderActiveTab();
+        this.persist();
+      } catch (err) {
+        if (typeof console !== 'undefined' && console.error) console.error('importIcsFile error:', err);
+        alert('Não consegui ler esse arquivo de calendário.');
+      }
   }
 
   // CRUD de Hábitos
@@ -9652,7 +10841,7 @@ class AppUI {
               return `
                 <div class="inline-edit-box">
                   <strong>✏️ Editar Hábito:</strong>
-                  <input type="text" id="edit-habit-title-${h.id}" class="pixel-input" value="${h.title}">
+                  <input type="text" id="edit-habit-title-${h.id}" class="pixel-input" value="${escHtml(h.title)}">
                   <div class="flex-row">
                     <input type="time" id="edit-habit-window-${h.id}" class="pixel-input" value="${h.window}">
                     <select id="edit-habit-freq-${h.id}" class="pixel-input">
@@ -9677,7 +10866,7 @@ class AppUI {
               <div class="mobile-stack-item" style="background: ${h.completed ? '#e6f4ea' : PALETTE.wallCream}; padding: 10px 12px; border: 2px solid ${PALETTE.ink};">
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
                   <div style="flex: 1; min-width: 0;">
-                    <strong style="font-size: 16px; display: block; word-break: break-word;">${h.title}</strong>
+                    <strong style="font-size: 16px; display: block; word-break: break-word;">${escHtml(h.title)}</strong>
                     <span style="font-size: 13px; color: ${PALETTE.grayDark}; display: block; margin-top: 2px;">
                       🔥 Sequência: <strong>${h.streak}d</strong> (Recorde: ${h.bestStreak || h.streak}d) · Até ${h.window} · ${h.frequency || 'Diário'}
                     </span>
@@ -9881,6 +11070,77 @@ class AppUI {
     this.persist();
   }
 
+  // Passos prontos por categoria, 100% offline. Nada entra na meta sem toque da usuária.
+  renderStepSuggestionsHtml(g) {
+    if (typeof CatLineStepTemplates === 'undefined') return '';
+    const sug = state.stepSuggestions;
+    if (!sug || sug.goalId !== g.id) {
+      return `
+        <div style="margin-bottom: 8px;">
+          <button class="pixel-btn btn-sm btn-purple" style="min-height: 44px;" onclick="window.app.suggestStepsForGoal('${g.id}')">💡 Sugerir passos</button>
+        </div>`;
+    }
+    const items = sug.steps.map((s, i) => `
+      <div style="display: flex; align-items: center; gap: 6px; padding: 4px 0;">
+        <span style="flex: 1; font-size: 13px; line-height: 1.3;">${escHtml(s.title)} · ${s.estMinutes} min</span>
+        <button class="pixel-btn btn-sm btn-green" style="min-height: 40px; min-width: 48px;" onclick="window.app.addSuggestedStep('${g.id}', ${i})" aria-label="Adicionar este passo">+</button>
+      </div>`).join('');
+    return `
+      <div class="pixel-card cream" style="margin-bottom: 8px; padding: 8px 10px;">
+        <div style="font-size: 13px; font-weight: 700; margin-bottom: 4px;">💡 Ideias de passos · ${escHtml(sug.label)}</div>
+        ${items || '<div style="font-size: 13px;">Você já tem todos os passos sugeridos!</div>'}
+        <div style="display: flex; gap: 6px; margin-top: 6px;">
+          ${items ? `<button class="pixel-btn btn-sm btn-green" style="min-height: 40px;" onclick="window.app.addAllSuggestedSteps('${g.id}')">Adicionar todos</button>` : ''}
+          <button class="pixel-btn btn-sm btn-secondary" style="min-height: 40px;" onclick="window.app.closeStepSuggestions()">Fechar</button>
+        </div>
+      </div>`;
+  }
+
+  suggestStepsForGoal(goalId) {
+    const goal = state.goals.find(g => g.id === goalId);
+    if (!goal || typeof CatLineStepTemplates === 'undefined') return;
+    const existing = (goal.steps || []).filter(s => !s.archived).map(s => s.title);
+    const result = CatLineStepTemplates.suggestSteps(goal.title, existing);
+    state.stepSuggestions = { goalId, label: result.label, steps: result.steps };
+    audio.playBlip();
+    this.renderTabMetas();
+  }
+
+  _addSuggestedStepNoRender(goal, step) {
+    if (goalStepEngine) goalStepEngine.addStep(goal, { title: step.title, estMinutes: step.estMinutes });
+  }
+
+  addSuggestedStep(goalId, index) {
+    const goal = state.goals.find(g => g.id === goalId);
+    const sug = state.stepSuggestions;
+    if (!goal || !sug || sug.goalId !== goalId || !sug.steps[index]) return;
+    const step = sug.steps[index];
+    this._addSuggestedStepNoRender(goal, step);
+    sug.steps.splice(index, 1);
+    audio.playBlip();
+    this.setCatSpeech(`Passo "${step.title}" adicionado à meta!`);
+    this.renderTabMetas();
+    this.persist();
+  }
+
+  addAllSuggestedSteps(goalId) {
+    const goal = state.goals.find(g => g.id === goalId);
+    const sug = state.stepSuggestions;
+    if (!goal || !sug || sug.goalId !== goalId) return;
+    sug.steps.forEach(s => this._addSuggestedStepNoRender(goal, s));
+    const n = sug.steps.length;
+    state.stepSuggestions = null;
+    audio.playMeowGreeting();
+    this.setCatSpeech(`${n} passos adicionados! Agora é só ir puxando o fio, um de cada vez.`);
+    this.renderTabMetas();
+    this.persist();
+  }
+
+  closeStepSuggestions() {
+    state.stepSuggestions = null;
+    this.renderTabMetas();
+  }
+
   // Gestão de Passos de Metas (v3.2.0 · Prompt 8)
   addStepToGoal(goalId) {
     const goal = state.goals.find(g => g.id === goalId);
@@ -9892,7 +11152,7 @@ class AppUI {
     if (!title) return;
 
     if (goalStepEngine) {
-      goalStepEngine.addStep(goal, title, estMinutes);
+      goalStepEngine.addStep(goal, { title, estMinutes: Number.isFinite(estMinutes) ? estMinutes : null });
     } else {
       if (!goal.steps) goal.steps = [];
       const order = goal.steps.length + 1;
@@ -9961,7 +11221,11 @@ class AppUI {
 
     const newOrder = step.order + delta;
     if (goalStepEngine) {
-      goalStepEngine.reorderStep(goal, stepId, newOrder);
+      const ids = goal.steps.slice().sort((a, b) => a.order - b.order).map(s => s.id);
+      const from = ids.indexOf(stepId);
+      const to = Math.max(0, Math.min(ids.length - 1, from + delta));
+      ids.splice(to, 0, ids.splice(from, 1)[0]);
+      goalStepEngine.reorderSteps(goal, ids);
     } else {
       step.order = Math.max(1, newOrder);
       goal.steps.sort((a, b) => a.order - b.order);
@@ -9983,7 +11247,12 @@ class AppUI {
     const halfEst = step.estMinutes ? Math.max(5, Math.round(step.estMinutes / 2)) : null;
 
     if (goalStepEngine) {
-      goalStepEngine.splitStep(goal, stepId, title1, title2, halfEst, halfEst);
+      goalStepEngine.splitStep(goal, stepId, {
+        firstTitle: title1,
+        secondTitle: title2,
+        firstEstMinutes: halfEst,
+        secondEstMinutes: halfEst
+      });
     } else {
       step.title = title1;
       step.estMinutes = halfEst;
@@ -10033,7 +11302,8 @@ class AppUI {
     const nowIso = Clock.isoString();
 
     if (goalStepEngine) {
-      goalStepEngine.toggleStepDone(goal, stepId, willBeDone ? nowIso : null);
+      if (willBeDone) goalStepEngine.completeStep(goal, stepId);
+      else goalStepEngine.uncompleteStep(goal, stepId);
     } else {
       step.doneAt = willBeDone ? nowIso : null;
     }
@@ -10101,7 +11371,7 @@ class AppUI {
               <option value="VIDA">Vida · 365 dias</option>
             </select>
             <select id="new-goal-color" class="pixel-input">
-              ${YARN_COLORS.map(c => `<option value="${c.id}">Novelo ${c.name}</option>`).join('')}
+              ${YARN_COLORS.map(c => `<option value="${c.id}">Novelo ${escHtml(c.name)}</option>`).join('')}
             </select>
             <div class="flex-row" style="gap: 4px;">
               <input type="number" id="new-goal-days" class="pixel-input" value="7" min="1" max="3650" style="width: 80px;" title="Duração total em dias">
@@ -10136,7 +11406,7 @@ class AppUI {
               return `
                 <div class="inline-edit-box">
                   <strong>✏️ Editar Meta:</strong>
-                  <input type="text" id="edit-goal-title-${g.id}" class="pixel-input" value="${g.title}">
+                  <input type="text" id="edit-goal-title-${g.id}" class="pixel-input" value="${escHtml(g.title)}">
                   <div class="flex-row">
                     <select id="edit-goal-horizon-${g.id}" class="pixel-input" style="width: 155px;" onchange="window.app.updateGoalDaysByHorizon(this.value, 'edit-goal-days-${g.id}')">
                       <option value="SEMANA" ${g.horizon === 'SEMANA' ? 'selected' : ''}>Semana · 7 dias</option>
@@ -10145,7 +11415,7 @@ class AppUI {
                       <option value="VIDA" ${g.horizon === 'VIDA' ? 'selected' : ''}>Vida · 365 dias</option>
                     </select>
                     <select id="edit-goal-color-${g.id}" class="pixel-input">
-                      ${YARN_COLORS.map(c => `<option value="${c.id}" ${c.id === g.yarnColorId ? 'selected' : ''}>Novelo ${c.name}</option>`).join('')}
+                      ${YARN_COLORS.map(c => `<option value="${c.id}" ${c.id === g.yarnColorId ? 'selected' : ''}>Novelo ${escHtml(c.name)}</option>`).join('')}
                     </select>
                     <div class="flex-row" style="gap: 4px;">
                       <input type="number" id="edit-goal-days-${g.id}" class="pixel-input" value="${currentDays}" style="width: 80px;" title="Duração total em dias">
@@ -10170,8 +11440,8 @@ class AppUI {
                   <div style="display: flex; align-items: flex-start; gap: 8px;">
                     <canvas class="yarn-color-dot mini-yarn-canvas" width="22" height="22" data-color="${g.yarnColorId}" style="flex-shrink: 0; margin-top: 2px;"></canvas>
                     <div style="flex: 1; min-width: 0;">
-                      <strong style="font-size: 16px; display: block; word-break: break-word;">${g.horizon} · ${g.title} (${currentDays}d)</strong>
-                      <span style="font-size: 13px; color: ${pal.shadow}; font-weight: 700;">Novelo ${pal.name} · ⏳ <span id="goal-timer-${g.id}">${formatRemainingTime(g.remainingSeconds)}</span></span>
+                      <strong style="font-size: 16px; display: block; word-break: break-word;">${g.horizon} · ${escHtml(g.title)} (${currentDays}d)</strong>
+                      <span style="font-size: 13px; color: ${pal.shadow}; font-weight: 700;">Novelo ${escHtml(pal.name)} · ⏳ <span id="goal-timer-${g.id}">${formatRemainingTime(g.remainingSeconds)}</span></span>
                     </div>
                   </div>
                   <div class="card-action-footer">
@@ -10209,7 +11479,7 @@ class AppUI {
                       if (isEditing) {
                         return `
                           <div style="display: flex; gap: 4px; align-items: center; background: #fff; padding: 6px; border: 1px solid ${PALETTE.ink};">
-                            <input type="text" id="edit-step-title-${step.id}" class="pixel-input" value="${step.title}" style="flex: 1;">
+                            <input type="text" id="edit-step-title-${step.id}" class="pixel-input" value="${escHtml(step.title)}" style="flex: 1;">
                             <input type="number" id="edit-step-est-${step.id}" class="pixel-input" value="${step.estMinutes || ''}" placeholder="Min" style="width: 60px;">
                             <button class="pixel-btn btn-sm btn-green" style="min-width: 48px; min-height: 48px;" onclick="window.app.saveEditStep('${g.id}', '${step.id}')">Salvar</button>
                             <button class="pixel-btn btn-sm btn-secondary" style="min-width: 48px; min-height: 48px;" onclick="window.app.cancelEditStep()">✕</button>
@@ -10224,7 +11494,7 @@ class AppUI {
                               ${isDone ? '✓' : '○'}
                             </button>
                             <div style="display: flex; flex-direction: column; min-width: 0;">
-                              <span style="font-size: 14px; font-weight: 600; text-decoration: ${isDone ? 'line-through' : 'none'}; color: ${isDone ? '#27ae60' : PALETTE.ink}; word-break: break-word;">${step.title}</span>
+                              <span style="font-size: 14px; font-weight: 600; text-decoration: ${isDone ? 'line-through' : 'none'}; color: ${isDone ? '#27ae60' : PALETTE.ink}; word-break: break-word;">${escHtml(step.title)}</span>
                               ${step.estMinutes ? `<span style="font-size: 12px; color: ${PALETTE.grayDark}; font-weight: 700;">⏱️ ${step.estMinutes} min</span>` : ''}
                             </div>
                           </div>
@@ -10240,6 +11510,8 @@ class AppUI {
                       `;
                     }).join('')}
                   </div>
+
+                  ${this.renderStepSuggestionsHtml(g)}
 
                   <!-- Form para Adicionar Passo -->
                   <div style="display: flex; gap: 6px; align-items: center;">
@@ -10297,25 +11569,49 @@ class AppUI {
       rewardEvents: state.rewardEvents || [],
       dayClosures: state.dayClosures || [],
       weeklyLogs: state.weeklyLogs || [],
+      moodLog: state.moodLog || [],
       habits: state.habits
     };
 
-    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+    const json = JSON.stringify(backupData, null, 2);
+    const fileName = `catline_backup_${state.dayKey}.json`;
+    const finish = () => {
+      audio.playMeowCelebrate();
+      this.spawnPixelConfetti();
+      alert("Backup JSON completo exportado com sucesso! Todos os seus mimos, hábitos, metas e compromissos estão salvos.");
+    };
+
+    // No APK, o WebView não baixa Blob: o seletor nativo do Android grava o arquivo.
+    if (NativeFiles.available()) {
+      NativeFiles.saveText(fileName, 'application/json', json).then(finish).catch(err => {
+        if (err && err.message === 'cancelled') return;
+        alert('Não consegui salvar o backup. Tente escolher outra pasta.');
+      });
+      return;
+    }
+
+    const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `catline_backup_${state.dayKey}.json`;
+    a.download = fileName;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-
-    audio.playMeowCelebrate();
-    this.spawnPixelConfetti();
-    alert("Backup JSON completo exportado com sucesso! Todos os seus mimos, hábitos, metas e compromissos estão salvos.");
+    finish();
   }
 
   triggerImportBackup() {
+    if (NativeFiles.available()) {
+      NativeFiles.pickText()
+        .then(res => this.applyBackupText(res.text))
+        .catch(err => {
+          if (err && err.message === 'cancelled') return;
+          alert('Não consegui abrir esse arquivo. Tente escolher outro.');
+        });
+      return;
+    }
     const input = document.getElementById('json-backup-input');
     if (input) input.click();
   }
@@ -10324,9 +11620,12 @@ class AppUI {
     const file = event.target.files && event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = (e) => this.applyBackupText(e.target.result);
+    reader.readAsText(file);
+  }
+
+  applyBackupText(raw) {
       try {
-        const raw = e.target.result;
         const engine = (typeof backupEngine !== 'undefined' && backupEngine)
           ? backupEngine
           : (typeof CatLineBackupEngine !== 'undefined' ? (CatLineBackupEngine.backupEngine || CatLineBackupEngine) : null);
@@ -10367,8 +11666,6 @@ class AppUI {
         if (typeof console !== 'undefined' && console.error) console.error('importJsonBackup error:', err);
         alert("Erro ao ler arquivo de backup JSON.");
       }
-    };
-    reader.readAsText(file);
   }
 
   renderTabInsights() {
@@ -10448,7 +11745,7 @@ class AppUI {
         <div class="heatmap-list">
           ${state.analyticsData.periodsOfDay.map(p => `
             <div class="heatmap-row">
-              <span class="heatmap-label">${p.name.split(' ')[0]}</span>
+              <span class="heatmap-label">${escHtml(p.name.split(' ')[0])}</span>
               <div class="heatmap-track">
                 <div class="heatmap-fill" style="width: ${p.pct}%; background: ${p.color};"></div>
               </div>
@@ -10609,7 +11906,7 @@ class AppUI {
           <div style="font-size: 36px; margin: 4px 0;">🎉 ${state.celebratingReward.icon} ✨</div>
           <h4 style="color: #1b5e20; margin-bottom: 4px;">PARABÉNS! VOCÊ SE PRESENTEOU!</h4>
           <p style="font-size: 16px; font-weight: 700; color: ${PALETTE.ink}; margin: 4px 0;">
-            "${state.celebratingReward.title}"
+            "${escHtml(state.celebratingReward.title)}"
           </p>
           <p style="font-size: 13px; color: ${PALETTE.grayDark}; margin-bottom: 10px; line-height: 1.4;">
             Você se dedicou aos seus hábitos e metas. Vá desfrutar do seu momento sem culpa! A gatinha está cheia de orgulho! 🐱💕
@@ -10654,7 +11951,7 @@ class AppUI {
                   <strong style="font-size: 13px; color: ${PALETTE.orange};">✏️ Editando Mimo:</strong>
                   <div>
                     <label style="font-size: 12px; font-weight: 700; color: ${PALETTE.ink};">Nome do mimo ou momento:</label>
-                    <input type="text" id="edit-rw-title-${rw.id}" value="${rw.title.replace(/"/g, '&quot;')}" style="width: 100%; box-sizing: border-box; padding: 7px 9px; border: 2px solid ${PALETTE.ink}; font-family: var(--font-body); font-size: 14px; margin-top: 3px;">
+                    <input type="text" id="edit-rw-title-${rw.id}" value="${escHtml(rw.title)}" style="width: 100%; box-sizing: border-box; padding: 7px 9px; border: 2px solid ${PALETTE.ink}; font-family: var(--font-body); font-size: 14px; margin-top: 3px;">
                   </div>
                   <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
                     <div>
@@ -10687,7 +11984,7 @@ class AppUI {
                 <div style="display: flex; align-items: flex-start; gap: 10px; width: 100%;">
                   <span style="font-size: 26px; flex-shrink: 0; background: ${PALETTE.wallCream}; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; border: 2px solid ${PALETTE.ink}; border-radius: 6px;">${rw.icon}</span>
                   <div style="flex: 1; min-width: 0;">
-                    <strong style="font-size: 15px; color: ${PALETTE.ink}; display: block; line-height: 1.3; word-break: break-word;">${rw.title}</strong>
+                    <strong style="font-size: 15px; color: ${PALETTE.ink}; display: block; line-height: 1.3; word-break: break-word;">${escHtml(rw.title)}</strong>
                     <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 4px;">
                       <span class="pixel-badge" style="background: #fff3e0; color: ${PALETTE.orangeShadow}; font-weight: 700; font-size: 12px; padding: 2px 6px; border: 1px solid ${PALETTE.orange}; border-radius: 3px;">
                         🐟 ${rw.cost} Peixinhos
@@ -10784,8 +12081,8 @@ class AppUI {
                 <div style="display: flex; align-items: center; gap: 10px; width: 100%;">
                   <span style="font-size: 24px; width: 38px; height: 38px; display: flex; align-items: center; justify-content: center; background: #fff; border: 2px solid ${PALETTE.ink}; border-radius: 6px; flex-shrink: 0;">${item.icon}</span>
                   <div style="flex: 1; min-width: 0;">
-                    <strong style="font-size: 15px; display: block;">${item.name}</strong>
-                    <span style="font-size: 12px; color: ${PALETTE.grayDark}; display: block;">${item.desc}</span>
+                    <strong style="font-size: 15px; display: block;">${escHtml(item.name)}</strong>
+                    <span style="font-size: 12px; color: ${PALETTE.grayDark}; display: block;">${escHtml(item.desc)}</span>
                   </div>
                 </div>
                 <div class="card-action-footer">
@@ -11146,7 +12443,7 @@ class AppUI {
         <div style="max-height: 170px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 8px; background: #fff8f0; border: 2px solid ${PALETTE.ink}; margin-bottom: 10px;">
           ${state.messages.map(m => `
             <div style="font-size: 15px; line-height: 1.4; align-self: ${m.fromUser ? 'flex-end' : 'flex-start'}; background: ${m.fromUser ? PALETTE.orange : '#fff'}; color: ${m.fromUser ? '#fff' : PALETTE.ink}; padding: 8px 12px; border-radius: 4px; border: 2px solid ${PALETTE.ink}; max-width: 88%;">
-              ${m.text}
+              ${escHtml(m.text)}
             </div>
           `).join('')}
         </div>
@@ -11258,7 +12555,7 @@ class AppUI {
                     style="${isLocked ? 'background:#5A4E7C; color:#fff; border-color:#181425; font-weight:700;' : (isUnlockedPass ? 'background:#e8f5e9; color:#1b5e20; border-color:#2e7d32;' : '')}"
                     onclick="window.app.quickToggleLockPreset('${p.id}')">
                     <span>${p.icon}</span>
-                    <span>${p.name}</span>
+                    <span>${escHtml(p.name)}</span>
                     <span>${isLocked ? '🔒' : (isUnlockedPass ? '🔓' : '＋')}</span>
                   </button>
                 `;
@@ -11295,7 +12592,7 @@ class AppUI {
                         <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
                           <span style="font-size: 24px; flex-shrink: 0;">${r.icon || '📱'}</span>
                           <div style="min-width: 0;">
-                            <strong style="font-size: 15px; display: block; color: ${PALETTE.ink};">${r.name}</strong>
+                            <strong style="font-size: 15px; display: block; color: ${PALETTE.ink};">${escHtml(r.name)}</strong>
                             <span style="font-size: 11px; color: ${PALETTE.grayDark};">
                               ${isPaused
                                 ? '⏸️ Trava pausada'
@@ -11314,7 +12611,7 @@ class AppUI {
                       <div class="card-action-footer" style="flex-wrap: wrap;">
                         ${isLockedNow ? `
                           <button class="pixel-btn btn-sm btn-purple" style="flex: 1;" onclick="window.app.simulateOpenSocialApp('${r.id}')">
-                            🔒 Abrir ${r.name}
+                            🔒 Abrir ${escHtml(r.name)}
                           </button>
                           <button class="pixel-btn btn-sm btn-gold" style="flex: 1;" onclick="window.app.redeemAppUnlockPass('${r.id}', 15, 15)" title="Usar 15 Peixinhos para liberar por 15 min">
                             🎁 Liberar 15m (15🐟)
@@ -11326,7 +12623,7 @@ class AppUI {
                           ` : ''}
                         ` : `
                           <button class="pixel-btn btn-sm btn-green" style="flex: 1;" onclick="window.app.launchUnlockedSocialApp('${r.id}')">
-                            🚀 Entrar no ${r.name}
+                            🚀 Entrar no ${escHtml(r.name)}
                           </button>
                           <button class="pixel-btn btn-sm btn-red" style="flex: 1;" onclick="window.app.relockAppNow('${r.id}')">
                             🔒 Trancar Agora
@@ -11551,7 +12848,7 @@ class AppUI {
     if (rigor === 0) {
       innerBoxHtml = `
         <div class="blocker-modal-header">
-          <span style="font-weight: 700; font-size: 16px;">${r.icon || '📱'} ${r.name} · Modo Observar</span>
+          <span style="font-weight: 700; font-size: 16px;">${r.icon || '📱'} ${escHtml(r.name)} · Modo Observar</span>
           <button class="pixel-btn btn-sm btn-icon" onclick="window.app.closeSimulatedModal()">✕</button>
         </div>
         <div class="blocker-cat-banner">
@@ -11567,13 +12864,13 @@ class AppUI {
       const pct = Math.round(((15 - sec) / 15) * 100);
       innerBoxHtml = `
         <div class="blocker-modal-header">
-          <span style="font-weight: 700; font-size: 16px;">${r.icon || '📱'} ${r.name} · Pausa Reflexiva</span>
+          <span style="font-weight: 700; font-size: 16px;">${r.icon || '📱'} ${escHtml(r.name)} · Pausa Reflexiva</span>
           <button class="pixel-btn btn-sm btn-icon" onclick="window.app.closeSimulatedModal()">✕</button>
         </div>
         <div class="blocker-cat-banner">
           <span class="blocker-cat-avatar">🧶</span>
           <div class="blocker-dialog-text">
-            Espere ${sec} segundos... O que você veio buscar no ${r.name} ajuda a puxar o fio das suas metas hoje?
+            Espere ${sec} segundos... O que você veio buscar no ${escHtml(r.name)} ajuda a puxar o fio das suas metas hoje?
           </div>
         </div>
         <div class="friction-timer-track">
@@ -11587,14 +12884,14 @@ class AppUI {
     } else {
       innerBoxHtml = `
         <div class="blocker-modal-header">
-          <span style="font-weight: 700; font-size: 16px;">🔒 ${r.icon || '📱'} ${r.name} Trancado!</span>
+          <span style="font-weight: 700; font-size: 16px;">🔒 ${r.icon || '📱'} ${escHtml(r.name)} Trancado!</span>
           <button class="pixel-btn btn-sm btn-icon" onclick="window.app.closeSimulatedModal()">✕</button>
         </div>
 
         <div class="blocker-cat-banner">
           <span class="blocker-cat-avatar">🐱</span>
           <div class="blocker-dialog-text" style="font-size: 13.5px;">
-            O <strong>${r.name}</strong> está trancado! Para destravar como recompensa, cumpra suas tarefas abaixo ou troque seus <strong>Peixinhos (Saldo: ${state.currencies.peixinhos}🐟)</strong>:
+            O <strong>${escHtml(r.name)}</strong> está trancado! Para destravar como recompensa, cumpra suas tarefas abaixo ou troque seus <strong>Peixinhos (Saldo: ${state.currencies.peixinhos}🐟)</strong>:
           </div>
         </div>
 
@@ -11633,7 +12930,7 @@ class AppUI {
               : `
                 ${pendingTasks.map(t => `
                   <div class="pending-task-blocker-row">
-                    <span style="font-size: 13px;">📅 <strong>${t.title}</strong> (${t.time})</span>
+                    <span style="font-size: 13px;">📅 <strong>${escHtml(t.title)}</strong> (${t.time})</span>
                     <button class="pixel-btn btn-sm btn-green" onclick="window.app.completeOccurrenceFromBlocker('${t.id}')">
                       ✓ Cumprir (+${t.reward}🐟)
                     </button>
@@ -11641,7 +12938,7 @@ class AppUI {
                 `).join('')}
                 ${pendingHabits.map(h => `
                   <div class="pending-task-blocker-row">
-                    <span style="font-size: 13px;">🔄 <strong>${h.title}</strong></span>
+                    <span style="font-size: 13px;">🔄 <strong>${escHtml(h.title)}</strong></span>
                     <button class="pixel-btn btn-sm btn-green" onclick="window.app.completeHabitFromBlocker('${h.id}')">
                       ✓ Cumprir (+8🐟)
                     </button>
@@ -11735,33 +13032,75 @@ class AppUI {
     syncNativeBlocker();
     try { diag = JSON.parse(nb.diagnostics() || '{}'); } catch (e) {}
     const enabled = !!diag.serviceEnabled;
+    const needsRestrictedStep = Number(diag.sdk) >= 33;
+    const canSelf = !!diag.canSelfEnable;
+    // Modo avançado: com a permissão dada por ADB o app liga o próprio serviço e pode religar se o Android desligar.
+    const autoHtml = (enabled && canSelf) ? `
+        <label style="display: flex; align-items: flex-start; gap: 8px; font-size: 12px; line-height: 1.35; margin: 6px 0; cursor: pointer;">
+          <input type="checkbox" ${diag.autoEnable ? 'checked' : ''} onchange="window.app.toggleBlockerAutoEnable(this.checked)" style="margin-top: 2px;">
+          <span>Religar o bloqueio sozinho se o Android desligar. Para desativar de vez, desmarque esta opção antes de desligar o serviço nas configurações.</span>
+        </label>` : '';
+    const advancedHtml = enabled ? '' : (canSelf ? `
+        <div style="margin: 8px 0; padding: 8px 10px; border: 2px solid ${PALETTE.leafGreen}; background: #eefaf0; font-size: 13px; line-height: 1.4;">
+          ⚡ Este celular já deu a permissão avançada. O Cat Line liga o serviço sozinho, sem passar pelas configurações restritas.
+          <div style="margin-top: 6px;"><button class="pixel-btn btn-sm btn-green" onclick="window.app.blockerSelfEnable()">⚡ Ligar agora</button></div>
+        </div>` : `
+        <details style="margin-top: 8px; font-size: 12px; line-height: 1.4;">
+          <summary style="cursor: pointer; font-weight: 700;">⚡ Modo avançado: ligar pelo computador</summary>
+          <p style="margin: 6px 0;">Pula as configurações restritas e deixa o Cat Line religar o bloqueio se o Android o desligar. Precisa de um computador com o ADB, uma única vez.</p>
+          <ol style="padding-left: 18px; margin: 4px 0;">
+            <li>No celular, abra Configurações, Sobre o telefone, e toque 7 vezes em Número da versão para liberar as Opções do desenvolvedor.</li>
+            <li>Nas Opções do desenvolvedor, ligue a Depuração USB. No Xiaomi, ligue também a depuração USB com configurações de segurança.</li>
+            <li>Conecte o cabo ao computador e autorize a depuração no celular.</li>
+            <li>No computador, rode este comando:
+              <code style="display: block; margin: 4px 0; padding: 6px; background: #181425; color: #FFF3B0; word-break: break-all; user-select: all;">adb shell pm grant com.catline.app android.permission.WRITE_SECURE_SETTINGS</code>
+            </li>
+            <li>Volte para cá e toque em Atualizar no diagnóstico. O botão Ligar agora aparece.</li>
+          </ol>
+          <p style="margin: 6px 0;">Essa permissão é poderosa. O Cat Line só a usa para ligar o próprio serviço de bloqueio e nunca mexe nos serviços de outros apps. Depois você pode desligar a Depuração USB.</p>
+        </details>`);
     const fmt = (ms) => ms ? Clock.formatTime(ms) : 'nunca';
     const rulesHtml = (diag.rules || []).map(r => {
       const color = r.status === 'TRAVA AGORA' ? PALETTE.leafGreen : PALETTE.grayDark;
       const inst = r.installed ? '' : ' · <em>não instalado</em>';
-      return `<li><strong>${r.name}</strong>: <span style="color:${color}">${r.status}</span>${inst}</li>`;
+      return `<li><strong>${escHtml(r.name)}</strong>: <span style="color:${color}">${escHtml(r.status)}</span>${inst}</li>`;
     }).join('');
     const lastBlock = diag.lastBlock ? diag.lastBlock.split('@') : null;
     const diagHtml = `
         <details style="margin-top: 8px; font-size: 12px;">
           <summary style="cursor:pointer; font-weight:700;">🔎 Diagnóstico do Bloqueador no Celular</summary>
           <ul style="padding-left: 16px; margin-top: 4px;">
-            <li>Versão: ${diag.version || '?'} · Android SDK ${diag.sdk || '?'} · ${diag.device || ''}</li>
+            <li>Versão: ${escHtml(diag.version || '?')} · Android SDK ${escHtml(diag.sdk || '?')} · ${escHtml(diag.device || '')}</li>
             <li>Serviço ligado nas configurações: <strong>${enabled ? 'sim' : 'não'}</strong></li>
             <li>Serviço conectado pela última vez: ${fmt(diag.connectedAt)}</li>
-            <li>Último app detectado: ${diag.lastPkg || 'nenhum'} · ${fmt(diag.lastAt)}</li>
-            <li>Último bloqueio: ${lastBlock ? lastBlock[0] + ' · ' + fmt(Number(lastBlock[1])) : 'nenhum'}</li>
+            <li>Último app detectado: ${escHtml(diag.lastPkg || 'nenhum')} · ${fmt(diag.lastAt)}</li>
+            <li>Último bloqueio: ${lastBlock ? escHtml(lastBlock[0]) + ' · ' + fmt(Number(lastBlock[1])) : 'nenhum'}</li>
             <li>Regras sincronizadas: ${fmt(diag.syncAt)}</li>
           </ul>
           <ul style="padding-left: 16px;">${rulesHtml || '<li>Nenhuma regra</li>'}</ul>
           <button class="pixel-btn btn-sm" style="margin-top:4px;" onclick="window.app.refreshBlockerDiag()">🔄 Atualizar</button>
         </details>`;
-    const testBtn = IS_RELEASE ? '' : `<button class="pixel-btn btn-sm" onclick="window.app.testBlockScreen()">🧪 Testar tela de bloqueio</button>`;
+    // O teste existe também no APK de release: é ele que mostra à usuária que o bloqueio está funcionando.
+    const testBtn = `<button class="pixel-btn btn-sm btn-purple" onclick="window.app.testBlockScreen()">👀 Ver como a gatinha bloqueia</button>`;
+
+    // Em alguns celulares o Android pausa serviços para economizar bateria e o bloqueio para de funcionar sem aviso.
+    let batteryWarn = '';
+    const ns = this.getNotifStatus();
+    if (enabled && ns && !ns.batteryUnrestricted) {
+      batteryWarn = `
+        <div style="margin: 6px 0; padding: 6px 8px; border: 2px dashed #E0A800; background: #fff8e1; font-size: 12px; line-height: 1.35;">
+          ⚠️ O Android pode pausar o bloqueio para economizar bateria. ${escHtml(this.batteryHint(ns.manufacturer))}
+          <div style="margin-top: 4px;"><button class="pixel-btn btn-sm btn-purple" style="min-height: 36px;" onclick="window.app.notifFixBattery()">Liberar bateria</button></div>
+        </div>`;
+    }
+
     if (enabled) {
       return `
       <div class="pixel-card" style="border-left: 6px solid ${PALETTE.leafGreen};">
         <h4 style="margin-bottom: 4px;">✅ Bloqueio Nativo Android Ativo</h4>
         <p style="font-size: 13px; margin-bottom: 6px;">As redes com status <strong>TRAVA AGORA</strong> serão bloqueadas automaticamente ao tentar abri-las no celular.</p>
+        ${batteryWarn}
+        ${autoHtml}
         <div class="flex-row" style="gap: 6px; flex-wrap: wrap; margin-bottom: 6px;">
           <button class="pixel-btn btn-sm btn-red" onclick="window.app.relockAllAppsNow()">🔒 Trancar Todas as Redes Agora</button>
           ${testBtn}
@@ -11769,20 +13108,47 @@ class AppUI {
         ${diagHtml}
       </div>`;
     }
+    const restrictedStep = needsRestrictedStep ? `
+          <li>Se o Android avisar <strong>Configuração restrita</strong>, toque em OK e volte. Depois toque em <strong>Info do app</strong>, em ⋮ no canto de cima e em <strong>Permitir configurações restritas</strong>. Esse item só aparece depois da tentativa do passo 1.</li>` : '';
     return `
       <div class="pixel-card" style="border-left: 6px solid #E06C75;">
         <h4 style="margin-bottom: 4px;">⚠️ Ative a Permissão de Bloqueio no Android</h4>
-        <p style="font-size: 13px; margin-bottom: 6px;">Para o celular cobrir o Instagram/TikTok fora do Cat Line, ligue o serviço em 2 passos:</p>
-        <ol style="font-size: 13px; padding-left: 18px; margin-bottom: 8px;">
-          <li>Toque em <strong>Ativar bloqueio</strong>, abra <strong>Apps instalados</strong> ou <strong>Serviços baixados</strong> e escolha <strong>Cat Line</strong>.</li>
-          <li>Ligue a chave. Se aparecer <strong>Configuração restrita</strong>, toque em <strong>Info do app</strong>, depois em ⋮ no canto superior e em <strong>Permitir configurações restritas</strong>. Depois repita o passo 1.</li>
+        <p style="font-size: 13px; margin-bottom: 6px;">Para o celular cobrir o Instagram e o TikTok fora do Cat Line, ligue o serviço em ${needsRestrictedStep ? '3' : '2'} passos. O Cat Line usa essa permissão só para saber qual app está aberto. Nenhum conteúdo sai do celular.</p>
+        <ol style="font-size: 13px; padding-left: 18px; margin-bottom: 8px; line-height: 1.4;">
+          <li>Toque em <strong>Ligar o serviço</strong>, abra <strong>Apps instalados</strong> ou <strong>Serviços baixados</strong>, escolha <strong>Cat Line</strong> e ligue a chave.</li>${restrictedStep}
+          <li>Repita o passo 1. Quando a chave ficar ligada, volte para cá. Esta tela se atualiza sozinha.</li>
         </ol>
         <div class="flex-row" style="gap: 6px; flex-wrap: wrap;">
-          <button class="pixel-btn btn-sm btn-green" onclick="window.app.openBlockerSettings()">Ativar bloqueio</button>
-          <button class="pixel-btn btn-sm" onclick="window.app.openBlockerAppInfo()">Info do app</button>
+          <button class="pixel-btn btn-sm btn-green" onclick="window.app.openBlockerSettings()">Ligar o serviço</button>
+          ${needsRestrictedStep ? '<button class="pixel-btn btn-sm" onclick="window.app.openBlockerAppInfo()">Info do app</button>' : ''}
+          ${testBtn}
         </div>
+        ${advancedHtml}
         ${diagHtml}
       </div>`;
+  }
+
+  blockerSelfEnable() {
+    let res = 'error';
+    try { res = window.AndroidBlocker.selfEnableService(); } catch (e) {}
+    const msg = {
+      ok: 'Ligado! O bloqueio já está valendo.',
+      already: 'O bloqueio já estava ligado.',
+      no_permission: 'Falta a permissão avançada. Siga o modo avançado para liberar.',
+      error: 'Não consegui ligar agora. Tente pelo passo a passo.'
+    }[res] || 'Não consegui ligar agora. Tente pelo passo a passo.';
+    this.setCatSpeech(msg);
+    this.renderActiveTab();
+    // O Android leva um instante para registrar o serviço
+    setTimeout(() => { if (state.activeTab === 'foco' || state.activeTab === 'mais') this.renderActiveTab(); }, 1200);
+  }
+
+  toggleBlockerAutoEnable(checked) {
+    try { window.AndroidBlocker.setAutoEnable(!!checked); } catch (e) {}
+    this.setCatSpeech(checked
+      ? 'Combinado! Se o Android desligar o bloqueio, eu ligo de novo quando você abrir o app.'
+      : 'Tudo bem. Não vou religar o bloqueio sozinha.');
+    this.renderActiveTab();
   }
 
   refreshBlockerDiag() {
@@ -11902,14 +13268,14 @@ class AppUI {
           ${SOCIAL_MEDIA_PRESETS.map(p => `
             <button type="button" class="preset-chip-btn ${state.selectedPresetId === p.id ? 'active' : ''}" onclick="window.app.selectSocialPreset('${p.id}')">
               <span>${p.icon}</span>
-              <span>${p.name}</span>
+              <span>${escHtml(p.name)}</span>
             </button>
           `).join('')}
         </div>
 
         <div style="display: flex; flex-direction: column; gap: 10px;">
           <div class="flex-row">
-            <input type="text" id="foco-app-name" class="pixel-input" placeholder="Nome do App · TikTok, Netflix, Jogo" value="${selPreset.name}" style="flex: 1;" oninput="window.app.onFocoAppNameInput(this.value)">
+            <input type="text" id="foco-app-name" class="pixel-input" placeholder="Nome do App · TikTok, Netflix, Jogo" value="${escHtml(selPreset.name)}" style="flex: 1;" oninput="window.app.onFocoAppNameInput(this.value)">
             <input type="text" id="foco-pkg-name" class="pixel-input" placeholder="Pacote automático" value="${selPreset.pkg}" style="flex: 1;">
           </div>
 
@@ -12523,9 +13889,9 @@ class AppUI {
               return presets.map(h => {
                 const isSel = b.selectedHabits.includes(h.name);
                 return `
-                  <div class="briefing-choice-card ${isSel ? 'selected' : ''}" onclick="window.app.toggleBriefingHabit('${h.name}')">
+                  <div class="briefing-choice-card ${isSel ? 'selected' : ''}" onclick="window.app.toggleBriefingHabit('${escHtml(h.name)}')">
                     <span>${h.icon}</span>
-                    <span style="flex: 1;">${h.name}</span>
+                    <span style="flex: 1;">${escHtml(h.name)}</span>
                     ${isSel ? '<span style="color: ' + PALETTE.leafGreen + ';">✓</span>' : ''}
                   </div>
                 `;
@@ -12557,7 +13923,7 @@ class AppUI {
         <div class="pixel-card">
           <h4>🎯 Meta & Cronômetro em Dias</h4>
           <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px;">
-            <input type="text" id="briefing-goal-title" class="pixel-input" value="${b.goalTitle}" placeholder="Título da sua grande meta">
+            <input type="text" id="briefing-goal-title" class="pixel-input" value="${escHtml(b.goalTitle)}" placeholder="Título da sua grande meta">
 
             <div>
               <span style="font-size: 13px; font-weight: 700;">Duração em dias:</span>
@@ -12582,7 +13948,7 @@ class AppUI {
                   return `
                     <div class="briefing-choice-card ${isSel ? 'selected' : ''}" onclick="window.app.selectBriefingGoalColor('${c.id}')">
                       <canvas class="yarn-color-dot mini-yarn-canvas" width="22" height="22" data-color="${c.id}"></canvas>
-                      <span style="flex: 1;">${c.name}</span>
+                      <span style="flex: 1;">${escHtml(c.name)}</span>
                       ${isSel ? '<span style="color: ' + PALETTE.leafGreen + ';">✓</span>' : ''}
                     </div>
                   `;
@@ -12592,7 +13958,7 @@ class AppUI {
 
             <div>
               <span style="font-size: 13px; font-weight: 700;">Mimo especial ao cumprir:</span>
-              <input type="text" id="briefing-goal-reward" class="pixel-input" value="${b.goalReward}" placeholder="Ex: Jantar delicioso, dia de descanso...">
+              <input type="text" id="briefing-goal-reward" class="pixel-input" value="${escHtml(b.goalReward)}" placeholder="Ex: Jantar delicioso, dia de descanso...">
             </div>
           </div>
         </div>
@@ -12620,9 +13986,9 @@ class AppUI {
             ${APP_PRESETS.map(a => {
               const isSel = b.selectedApps.includes(a.name);
               return `
-                <div class="briefing-choice-card ${isSel ? 'selected' : ''}" onclick="window.app.toggleBriefingApp('${a.name}')">
+                <div class="briefing-choice-card ${isSel ? 'selected' : ''}" onclick="window.app.toggleBriefingApp('${escHtml(a.name)}')">
                   <span>${a.icon}</span>
-                  <span style="flex: 1;">${a.name}</span>
+                  <span style="flex: 1;">${escHtml(a.name)}</span>
                   ${isSel ? '<span style="color: ' + PALETTE.leafGreen + ';">✓</span>' : ''}
                 </div>
               `;
@@ -12684,15 +14050,15 @@ class AppUI {
             <div class="briefing-summary-item">
               <span class="briefing-summary-label">GRANDE META COM NOVELO</span>
               <span class="briefing-summary-val">
-                ${b.goalHorizon} · ${b.goalTitle} · ${b.goalDays} dias de prazo<br>
-                Novelo ${goalPalette.name} na patinha · Mimo: ${b.goalReward}
+                ${b.goalHorizon} · ${escHtml(b.goalTitle)} · ${b.goalDays} dias de prazo<br>
+                Novelo ${escHtml(goalPalette.name)} na patinha · Mimo: ${escHtml(b.goalReward)}
               </span>
             </div>
 
             <div class="briefing-summary-item">
               <span class="briefing-summary-label">FOCO & REDES SOCIAIS</span>
               <span class="briefing-summary-val">
-                ${b.selectedApps.join(', ') || 'Nenhuma'} · ${rigorObj.name}<br>
+                ${b.selectedApps.join(', ') || 'Nenhuma'} · ${escHtml(rigorObj.name)}<br>
                 Janela: ${b.windowStart} às ${b.windowEnd}
               </span>
             </div>
@@ -12789,7 +14155,7 @@ class AppUI {
         return `
           <div class="inline-edit-box">
             <strong>✏️ Editar Compromisso:</strong>
-            <input type="text" id="edit-occ-title-${o.id}" class="pixel-input" value="${o.title}">
+            <input type="text" id="edit-occ-title-${o.id}" class="pixel-input" value="${escHtml(o.title)}">
             <div class="flex-row">
               <input type="time" id="edit-occ-time-${o.id}" class="pixel-input" value="${o.time}">
               <select id="edit-occ-effort-${o.id}" class="pixel-input">
@@ -12821,7 +14187,7 @@ class AppUI {
         return `
           <div class="inline-edit-box">
             <strong>✏️ Editar Hábito:</strong>
-            <input type="text" id="edit-habit-title-${h.id}" class="pixel-input" value="${h.title}">
+            <input type="text" id="edit-habit-title-${h.id}" class="pixel-input" value="${escHtml(h.title)}">
             <div class="flex-row">
               <input type="time" id="edit-habit-window-${h.id}" class="pixel-input" value="${h.window}">
               <select id="edit-habit-freq-${h.id}" class="pixel-input">
@@ -12869,7 +14235,18 @@ class AppUI {
           unmarked: 'Sem marcação'
         };
         const stLabel = stateLabels[normSt] || 'Pendente';
-        stateBadge = `<span class="state-pill state-pill-${normSt}">${stLabel}</span>`;
+        const maxRuns = o.maxRuns || (o.recurrence === 'Pontual · 2 vezes' ? 2 : (o.recurrence === 'Pontual · 1 vez' ? 1 : 0));
+        const runBadge = maxRuns > 0
+          ? ` <span class="state-pill" style="background:#fef3c7;color:#92400e;">⚡ ${o.completedRuns || 0}/${maxRuns}</span>`
+          : '';
+        const conflictBadge = this.hasTimeConflict(o)
+          ? ` <span class="state-pill" style="background:#fee2e2;color:#b91c1c;">⚠️ Conflito</span>`
+          : '';
+        const secondRunBtn = (maxRuns === 2 && (o.completedRuns || 0) === 1 && item.done)
+          ? ` <button class="pixel-btn btn-sm btn-gold" onclick="event.stopPropagation(); window.app.reopenSecondRun('${o.id}')">Fazer 2ª vez</button>`
+          : '';
+        const noteLine = o.notes ? `<div style="font-size:12px;color:${PALETTE.grayDark};margin-top:2px;">📝 ${escHtml(o.notes)}</div>` : '';
+        stateBadge = `<span class="state-pill state-pill-${normSt}">${stLabel}</span>${runBadge}${conflictBadge}${secondRunBtn}${noteLine}`;
 
         if (normSt === 'done') {
           const chk = (state.checkIns || []).filter(c => c.commitmentId === o.id).slice(-1)[0];
@@ -12887,7 +14264,7 @@ class AppUI {
           const g = (state.goals || []).find(x => x.id === o.goalId);
           const s = g && g.steps ? g.steps.find(x => x.id === o.stepId) : null;
           if (s) {
-            linkedStepText = `<div style="font-size: 11px; color: ${PALETTE.cozyPurple}; font-weight: 700; margin-top: 3px;">🧶 Meta: ${g.title} · Passo: ${s.title}</div>`;
+            linkedStepText = `<div style="font-size: 11px; color: ${PALETTE.cozyPurple}; font-weight: 700; margin-top: 3px;">🧶 Meta: ${escHtml(g.title)} · Passo: ${escHtml(s.title)}</div>`;
           }
         }
       }
@@ -12964,7 +14341,7 @@ class AppUI {
               <div class="timeline-body" style="flex: 1; min-width: 0;">
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 6px;">
                   <div style="display: flex; flex-direction: column; gap: 3px;">
-                    <div class="timeline-title">${item.title}</div>
+                    <div class="timeline-title">${escHtml(item.title)}</div>
                     ${stateBadge}
                   </div>
                   <span class="timeline-time-badge">⏰ ${item.time}</span>
@@ -13109,6 +14486,7 @@ class AppUI {
               ${state.notificationsEnabled ? '🔔 Ativo ✓' : 'Ativar Avisos 🔔'}
             </button>
           </div>
+          ${this.renderNotifDiagnosticsHtml()}
           <div class="flex-row" style="margin-top: 8px; gap: 6px; flex-wrap: wrap;">
             <button class="pixel-btn btn-sm ${state.darkMode ? 'btn-gold' : 'btn-secondary'}" onclick="window.app.toggleDarkMode()">
               ${state.darkMode ? '☀️ Tema Claro' : '🌙 Modo Noturno'}
@@ -13184,13 +14562,14 @@ class AppUI {
     const t = state.quickCreateType || 'occurrence';
 
     let formHtml = '';
-    if (t === 'occurrence') {
+    if (t === 'occurrence' || t === 'once') {
       const selG = (state.goals || []).find(g => g.id === state.quickCreateSelectedGoalId);
       const availableSteps = selG && selG.steps ? selG.steps.filter(s => !s.archived && !s.doneAt) : [];
+      const isOnce = t === 'once';
 
       formHtml = `
         <div style="display: flex; flex-direction: column; gap: 10px;">
-          <input type="text" id="qc-occ-title" class="pixel-input" placeholder="O que vamos fazer hoje?" autofocus>
+          <input type="text" id="qc-occ-title" class="pixel-input" placeholder="${isOnce ? 'Atividade avulsa (ex: ir ao banco, pagar boleto)' : 'O que vamos fazer hoje?'}" autofocus>
           <div class="flex-row">
             <div style="flex: 1;">
               <label style="font-size: 12px; font-weight: 700;">⏰ Horário:</label>
@@ -13207,26 +14586,35 @@ class AppUI {
           </div>
           <div class="flex-row">
             <select id="qc-occ-recurrence" class="pixel-input" style="flex: 1;">
-              <option value="Todos os dias" selected>🔄 Todos os dias</option>
-              <option value="Dias úteis">💼 Dias úteis</option>
-              <option value="Finais de semana">🏖️ Finais de semana</option>
-              <option value="3x por semana">✨ 3x por semana</option>
-              <option value="Apenas hoje">📌 Apenas hoje</option>
+              ${isOnce ? `
+                <option value="Pontual · 1 vez" selected>⚡ Pontual · Só 1 vez</option>
+                <option value="Pontual · 2 vezes">⚡ Pontual · Só 2 vezes</option>
+                <option value="Apenas hoje">📌 Apenas hoje</option>
+              ` : `
+                <option value="Todos os dias" selected>🔄 Todos os dias</option>
+                <option value="Dias úteis">💼 Dias úteis</option>
+                <option value="Finais de semana">🏖️ Finais de semana</option>
+                <option value="3x por semana">✨ 3x por semana</option>
+                <option value="Apenas hoje">📌 Apenas hoje</option>
+                <option value="Pontual · 1 vez">⚡ Pontual · Só 1 vez</option>
+                <option value="Pontual · 2 vezes">⚡ Pontual · Só 2 vezes</option>
+              `}
             </select>
           </div>
+          <input type="text" id="qc-occ-notes" class="pixel-input" placeholder="📝 Nota rápida (opcional)">
           <div class="flex-row">
             <div style="flex: 1;">
               <label style="font-size: 12px; font-weight: 700;">🎯 Meta opcional:</label>
               <select id="qc-occ-goal" class="pixel-input" onchange="window.app.onQuickCreateGoalChange(this.value)">
                 <option value="">Sem meta vinculada</option>
-                ${(state.goals || []).map(g => `<option value="${g.id}" ${state.quickCreateSelectedGoalId === g.id ? 'selected' : ''}>${g.title}</option>`).join('')}
+                ${(state.goals || []).map(g => `<option value="${g.id}" ${state.quickCreateSelectedGoalId === g.id ? 'selected' : ''}>${escHtml(g.title)}</option>`).join('')}
               </select>
             </div>
             <div style="flex: 1;">
               <label style="font-size: 12px; font-weight: 700;">🐾 Passo da meta:</label>
               <select id="qc-occ-step" class="pixel-input">
                 <option value="">Sem passo vinculado</option>
-                ${availableSteps.map(s => `<option value="${s.id}">${s.title}</option>`).join('')}
+                ${availableSteps.map(s => `<option value="${s.id}">${escHtml(s.title)}</option>`).join('')}
               </select>
             </div>
           </div>
@@ -13271,7 +14659,7 @@ class AppUI {
             <div style="flex: 1;">
               <label style="font-size: 12px; font-weight: 700;">🧶 Cor do Novelo:</label>
               <select id="qc-goal-color" class="pixel-input">
-                ${YARN_COLORS.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+                ${YARN_COLORS.map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`).join('')}
               </select>
             </div>
           </div>
@@ -13310,6 +14698,7 @@ class AppUI {
       </div>
       <div class="subnav-pills-bar" style="margin-bottom: 12px;">
         <button class="subnav-pill-btn ${t === 'occurrence' ? 'active' : ''}" onclick="window.app.setQuickCreateType('occurrence')">📅 Compromisso</button>
+        <button class="subnav-pill-btn ${t === 'once' ? 'active' : ''}" onclick="window.app.setQuickCreateType('once')">⚡ Avulsa 1x/2x</button>
         <button class="subnav-pill-btn ${t === 'habit' ? 'active' : ''}" onclick="window.app.setQuickCreateType('habit')">🔄 Hábito</button>
         <button class="subnav-pill-btn ${t === 'goal' ? 'active' : ''}" onclick="window.app.setQuickCreateType('goal')">🎯 Meta</button>
         <button class="subnav-pill-btn ${t === 'reward' ? 'active' : ''}" onclick="window.app.setQuickCreateType('reward')">🎁 Mimo</button>
@@ -13320,16 +14709,18 @@ class AppUI {
 
   submitQuickCreate() {
     const t = state.quickCreateType || 'occurrence';
-    if (t === 'occurrence') {
+    if (t === 'occurrence' || t === 'once') {
       const title = (document.getElementById('qc-occ-title')?.value || '').trim();
       if (!title) return alert('Digite o título do compromisso!');
       const time = document.getElementById('qc-occ-time')?.value || '19:00';
       const effort = document.getElementById('qc-occ-effort')?.value || 'M';
-      const recurrence = document.getElementById('qc-occ-recurrence')?.value || 'Todos os dias';
+      const recurrence = document.getElementById('qc-occ-recurrence')?.value || (t === 'once' ? 'Pontual · 1 vez' : 'Todos os dias');
+      const notes = (document.getElementById('qc-occ-notes')?.value || '').trim();
       const goalId = document.getElementById('qc-occ-goal')?.value || null;
       const stepId = document.getElementById('qc-occ-step')?.value || null;
       const reward = effort === 'G' ? 20 : (effort === 'M' ? 10 : 5);
       const estMin = effort === 'G' ? 60 : (effort === 'M' ? 30 : 15);
+      const maxRuns = recurrence === 'Pontual · 2 vezes' ? 2 : (recurrence === 'Pontual · 1 vez' ? 1 : 0);
       state.occurrences.push({
         id: `occ-${Clock.now()}`,
         title,
@@ -13337,6 +14728,9 @@ class AppUI {
         effort,
         reward,
         recurrence,
+        maxRuns,
+        completedRuns: 0,
+        notes,
         date: state.dayKey,
         plannedStart: `${state.dayKey}T${time}:00`,
         plannedZone: 'America/Sao_Paulo',
@@ -13492,8 +14886,107 @@ class AppUI {
     this.persist();
   }
 
+  // Diagnóstico dos avisos no Android: mostra o que impede um aviso de chegar e leva à tela certa.
+  getNotifStatus() {
+    try {
+      if (window.AndroidNotify && typeof window.AndroidNotify.status === 'function') {
+        return JSON.parse(window.AndroidNotify.status());
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  renderNotifDiagnosticsHtml() {
+    const st = this.getNotifStatus();
+    if (!st) return '';
+    const notifOk = st.notifications && !st.channelBlocked;
+    const rows = [
+      { ok: notifOk, label: 'Permissão para avisar', fix: 'window.app.notifFixNotifications()', btn: 'Permitir',
+        hint: notifOk ? '' : 'Sem essa permissão o Android esconde todos os avisos da gatinha.' },
+      { ok: st.exactAlarm, label: 'Horário exato', fix: 'window.app.notifFixExact()', btn: 'Permitir',
+        hint: st.exactAlarm ? '' : 'Sem ela os avisos podem atrasar vários minutos.' },
+      { ok: st.batteryUnrestricted, label: 'Sem economia de bateria', fix: 'window.app.notifFixBattery()', btn: 'Liberar',
+        hint: st.batteryUnrestricted ? '' : this.batteryHint(st.manufacturer) }
+    ];
+    const rowsHtml = rows.map(r => `
+      <div style="display: flex; align-items: center; gap: 8px; padding: 4px 0;">
+        <span style="font-size: 16px;">${r.ok ? '✅' : '⚠️'}</span>
+        <div style="flex: 1; min-width: 0;">
+          <div style="font-size: 13px; font-weight: 700;">${r.label}</div>
+          ${r.hint ? `<div style="font-size: 12px; color: ${PALETTE.grayDark}; line-height: 1.3;">${escHtml(r.hint)}</div>` : ''}
+        </div>
+        ${r.ok ? '' : `<button class="pixel-btn btn-sm btn-purple" style="min-height: 40px;" onclick="${r.fix}">${r.btn}</button>`}
+      </div>`).join('');
+    const allOk = rows.every(r => r.ok);
+    return `
+      <div style="margin-top: 8px; padding: 8px 10px; background: #fff; border: 2px dashed ${PALETTE.cozyPurple};">
+        <div style="font-size: 13px; font-weight: 700; margin-bottom: 2px;">${allOk ? '🐾 Tudo certo para os avisos chegarem' : '🐾 Falta ajustar para os avisos chegarem'}</div>
+        ${rowsHtml}
+        <div class="flex-row" style="gap: 6px; flex-wrap: wrap; margin-top: 6px;">
+          <button class="pixel-btn btn-sm btn-green" style="min-height: 40px;" onclick="window.app.notifTestNow()">Aviso de teste agora</button>
+          <button class="pixel-btn btn-sm btn-secondary" style="min-height: 40px;" onclick="window.app.notifTestIn1Min()">Testar em 1 minuto</button>
+        </div>
+      </div>`;
+  }
+
+  batteryHint(manufacturer) {
+    const m = String(manufacturer || '');
+    if (/xiaomi|redmi|poco/.test(m)) return 'Xiaomi: procure Início automático e deixe a bateria do Cat Line sem restrições.';
+    if (/samsung/.test(m)) return 'Samsung: em Bateria, procure Limites de uso em segundo plano e tire o Cat Line da lista de apps em suspensão.';
+    if (/oppo|realme|oneplus/.test(m)) return 'Permita o início automático e a atividade em segundo plano do Cat Line.';
+    if (/huawei|honor/.test(m)) return 'Em Início de aplicativos, gerencie manualmente e permita a atividade em segundo plano.';
+    if (/vivo|iqoo/.test(m)) return 'Permita o início automático e a atividade em segundo plano do Cat Line.';
+    return 'Se os avisos atrasarem ou sumirem, tire o Cat Line da economia de bateria.';
+  }
+
+  notifFixNotifications() { try { window.AndroidNotify.requestNotificationPermission(); } catch (e) {} }
+  notifFixExact() { try { window.AndroidNotify.openExactAlarmSettings(); } catch (e) {} }
+  notifFixBattery() { try { window.AndroidNotify.openBatterySettings(); } catch (e) {} }
+
+  notifTestNow() {
+    try { window.AndroidNotify.sendTestNow(); } catch (e) {}
+    this.setCatSpeech('Mandei um aviso agora. Se ele não apareceu, confira a permissão acima.');
+  }
+
+  notifTestIn1Min() {
+    try {
+      window.AndroidBlocker.scheduleDeadline('teste-agendado', 'Teste agendado da gatinha', 'agora', Clock.now() + 60000, 'NOW', 'pink');
+      this.setCatSpeech('Agendei um teste para daqui a 1 minuto. Pode bloquear a tela e esperar.');
+    } catch (e) {
+      this.setCatSpeech('Não consegui agendar o teste neste aparelho.');
+    }
+  }
+
+  // No APK, liga os avisos uma única vez: antes eles só funcionavam depois de achar o botão escondido na aba Mais.
+  autoEnableNativeNotifications() {
+    if (!window.AndroidNotify) return;
+    let done = false;
+    try { done = localStorage.getItem('CATLINE_NOTIF_AUTO_V1') === '1'; } catch (e) {}
+    if (done) return;
+    try { localStorage.setItem('CATLINE_NOTIF_AUTO_V1', '1'); } catch (e) {}
+    if (!state.notificationsEnabled) {
+      state.notificationsEnabled = true;
+      this.persist();
+    }
+  }
+
   // Lembretes Reais no Horário dos Compromissos
   async requestRealReminders() {
+    // No APK os avisos são do Android. O botão confere a permissão em vez de depender da API de notificação da web.
+    if (window.AndroidNotify) {
+      state.notificationsEnabled = !state.notificationsEnabled;
+      if (state.notificationsEnabled) {
+        const st = this.getNotifStatus();
+        if (st && (!st.notifications || st.channelBlocked)) this.notifFixNotifications();
+        this.setCatSpeech('Avisos ligados! Confira abaixo se o Android deixa eles chegarem.');
+      } else {
+        this.setCatSpeech('Avisos desligados. Nenhum alarme fica agendado.');
+      }
+      this.syncNativeReminders();
+      this.renderActiveTab();
+      this.persist();
+      return;
+    }
     if (!('Notification' in window)) {
       alert('Este navegador/aparelho usa lembretes sonoros internos do Cat Line! Mantenha o som ativo.');
       state.notificationsEnabled = true;
@@ -13555,27 +15048,83 @@ class AppUI {
     // Banner superior removido
   }
 
+  // Agenda no Android os avisos de compromissos e prazos de metas. Cada compromisso usa a PROPRIA data,
+  // então o aviso chega mesmo com o app fechado. Só reenvia o que mudou desde a última sincronização.
   syncNativeReminders() {
-    if (!window.AndroidBlocker || typeof window.AndroidBlocker.scheduleReminder !== 'function') return;
-    if (!state.notificationsEnabled || state.cat.isRestMode) return;
+    const nb = window.AndroidBlocker;
+    if (!nb || (typeof nb.scheduleDeadline !== 'function' && typeof nb.scheduleReminder !== 'function')) return;
+    if (typeof CatLineReminderPlanner === 'undefined') return;
+    const notify = window.AndroidNotify;
+
+    if (!state.notificationsEnabled || state.cat.isRestMode) {
+      // Avisos desligados ou modo descanso: nada de alarme pendente no Android
+      if (this._nativePlan === undefined || (this._nativePlan && this._nativePlan.length > 0) || this._nativeCleared !== true) {
+        try {
+          if (notify && typeof notify.cancelAllReminders === 'function') notify.cancelAllReminders();
+          else (this._nativePlan || []).forEach(i => nb.cancelReminder(i.id));
+        } catch (e) {}
+        this._nativePlan = [];
+        this._nativeCleared = true;
+      }
+      return;
+    }
+    this._nativeCleared = false;
+
+    // Primeira sincronização desta abertura: começa do zero para não deixar alarme antigo para trás
+    if (this._nativePlan === undefined) {
+      try { if (notify && typeof notify.cancelAllReminders === 'function') notify.cancelAllReminders(); } catch (e) {}
+      this._nativePlan = [];
+    }
 
     const nowMs = Clock.now();
-
-    state.occurrences.forEach(o => {
-      if (o.state !== 'PENDENTE') {
-        try { window.AndroidBlocker.cancelReminder(o.id); } catch (e) {}
-        return;
+    const plan = CatLineReminderPlanner.planReminders(
+      { occurrences: state.occurrences, goals: state.goals, dayKey: state.dayKey, nowMs },
+      {
+        makeLocalDate: (y, mo, d, h, mi) => {
+          const dt = Clock.newDate();
+          dt.setFullYear(y, mo - 1, d);
+          dt.setHours(h, mi, 0, 0);
+          return dt.getTime();
+        }
       }
-      const parts = (o.time || '19:00').split(':').map(Number);
-      if (isNaN(parts[0])) return;
-      const d = Clock.newDate();
-      d.setHours(parts[0], parts[1] || 0, 0, 0);
-      const triggerMs = d.getTime();
+    );
 
-      if (triggerMs > nowMs) {
-        try { window.AndroidBlocker.scheduleReminder(o.id, o.title, o.time, triggerMs); } catch (e) {}
+    // Compromissos que deixaram de estar pendentes perdem os avisos, uma vez por abertura
+    if (!this._cancelledIds) this._cancelledIds = new Set();
+    (state.occurrences || []).forEach(o => {
+      if (!o) return;
+      const st = String(o.state || 'pending').toLowerCase();
+      if (st === 'pending' || st === 'pendente') { this._cancelledIds.delete(o.id); return; }
+      if (!this._cancelledIds.has(o.id)) {
+        this._cancelledIds.add(o.id);
+        try { nb.cancelReminder(o.id); } catch (e) {}
       }
     });
+
+    const diff = CatLineReminderPlanner.diffPlans(this._nativePlan, plan.items);
+    diff.cancel.forEach(id => { try { nb.cancelReminder(id); } catch (e) {} });
+    diff.schedule.forEach(i => {
+      try {
+        if (typeof nb.scheduleDeadline === 'function') nb.scheduleDeadline(i.id, i.title, i.time, i.at, i.kind, i.color);
+        else if (i.kind === 'NOW') nb.scheduleReminder(i.id, i.title, i.time, i.at);
+      } catch (e) {}
+    });
+    this._nativePlan = plan.items;
+  }
+
+  async checkAppUpdate() {
+    const APP_VERSION = '3.2.0';
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    try {
+      const res = await fetch('https://api.github.com/repos/MarxPao/cat-line/releases/latest', { cache: 'no-store' });
+      if (!res.ok) return;
+      const rel = await res.json();
+      const latest = String(rel.tag_name || '').replace(/^v/i, '').trim();
+      if (latest && latest !== APP_VERSION && latest.localeCompare(APP_VERSION, undefined, { numeric: true }) > 0) {
+        state.availableUpdate = { version: latest, url: 'https://marxpao.github.io/cat-line/' };
+        if (state.activeTab === 'hoje') this.renderActiveTab();
+      }
+    } catch (e) {}
   }
 
   checkNativeCompletedTasks() {

@@ -25,7 +25,16 @@ const testScripts = [
   'test-phase17-weekly-log.js',
   'test-phase18-module-switches.js',
   'test-phase19-backup-schema-v2.js',
-  'test-phase20-final-regression.js'
+  'test-phase20-final-regression.js',
+  'test-phase21-xss.js',
+  'test-phase22-mood.js',
+  'test-phase23-step-templates.js',
+  'test-phase24-ics-import.js',
+  'test-phase25-single-file.js',
+  'test-phase26-native-bridges.js',
+  'test-phase27-reminder-planner.js',
+  'test-phase28-blocker-setup.js',
+  'test-phase29-adb-enable.js'
 ];
 
 console.log('🐾 [Cat Line] Executando suíte completa de testes automatizados...\n');

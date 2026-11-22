@@ -38,6 +38,7 @@ public class ReminderReceiver extends BroadcastReceiver {
                 NotificationHelper.cancelReminder(context, id);  // cancela avisos futuros dessa tarefa
             }
             NotificationHelper.recordTaskCompletedLocally(context, id, title);
+            CatLineWidgetProvider.markDoneAndRefresh(context, id);
             NotificationHelper.showDoneCelebration(context, id, title, color);
 
         } else if (NotificationHelper.ACTION_SNOOZE_TASK.equals(action)) {
@@ -58,8 +59,9 @@ public class ReminderReceiver extends BroadcastReceiver {
                 NotificationHelper.scheduleDeadline(context, id, title, label, nextAt, NotificationHelper.KIND_NOW, color);
             }
 
-        } else if (Intent.ACTION_BOOT_COMPLETED.equals(action)) {
-            Log.d(TAG, "Reboot: reagendando avisos");
+        } else if (Intent.ACTION_BOOT_COMPLETED.equals(action) || Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)) {
+            Log.d(TAG, "Reboot ou atualizacao do app: reagendando avisos");
+            AccessibilityEnabler.healIfNeeded(context);
             NotificationHelper.rescheduleAll(context);
         }
     }

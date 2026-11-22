@@ -1,7 +1,7 @@
-# 🐾 Cat Line (v3.2.0)
+# 🐾 Cat Line (v3.3.0)
 > *App gamificado de agenda, hábitos, metas e foco em pixel art 8-bit retro, protagonizado por uma gatinha calico e um novelo de lã.*
 
-[![Versão](https://img.shields.io/badge/versão-3.2.0-orange.svg)]()
+[![Versão](https://img.shields.io/badge/versão-3.3.0-orange.svg)]()
 [![Android](https://img.shields.io/badge/android-5.0%20%2B%20(API%2021--33)-brightgreen.svg)]()
 [![Testes](https://img.shields.io/badge/testes-20%2F20%20suítes%20aprovadas-success.svg)]()
 [![Privacidade](https://img.shields.io/badge/privacidade-100%25%20offline-blue.svg)]()
@@ -15,7 +15,7 @@
 
 ---
 
-## 🌟 Principais Recursos & Novidades da v3.2.0
+## 🌟 Principais Recursos (base v3.2.0 + v3.3.0)
 
 1. **Metas com Passos Editáveis:** Passos reordenáveis com estimativa de tempo (`estMinutes`), divisão de passos (✂️) e botão "Agendar este passo" em 2 toques.
 2. **Máquina de Estados de Compromissos:** 5 estados (`pending`, `done`, `missed`, `rescheduled`, `unmarked`) com suporte a fusos IANA, check-in ao vivo (+2🐟 + 1🐟 bônus), retroativo (0.5x), "Não cumpri" sem desconto e janela de desfazer de 10 min.
@@ -30,7 +30,7 @@
 ## 🚀 Como Executar e Testar
 
 ### 1. Bateria de Testes Automatizados (`npm test`)
-Executa todas as 8 suítes determinísticas (60 testes no total):
+Executa todas as suítes determinísticas (21 arquivos de teste):
 ```bash
 npm test
 ```
@@ -43,15 +43,22 @@ npm start
 ```
 
 ### 3. Compilação e Empacotamento do APK Oficial
-Gera o APK Android nativo assinado e alinhado:
+Gera o APK Android nativo assinado e alinhado. Para o APK de release, informe o keystore oficial (o mesmo de sempre, para atualizar sem perder dados):
+```bash
+set CATLINE_KEYSTORE=C:\caminho\catline-release.keystore
+set CATLINE_KEYSTORE_PASS=sua-senha
+```
+Sem essas variáveis o build usa uma chave local de desenvolvimento, que não atualiza instalações de release.
+
+Ferramentas do Android: o build espera `tools-apk/build-tools/android-13` (build-tools 33.0.2) e `tools-apk/android-33.jar` (android.jar da plataforma 33). Baixe os dois pacotes do repositório oficial do Google, `https://dl.google.com/android/repository/build-tools_r33.0.2-windows.zip` e `platform-33-ext3_r03.zip`, e confira o SHA-1 no `repository2-3.xml` do mesmo endereço. A pasta `tools-apk/` não vai para o Git. Defina `JAVA_HOME` apontando para um JDK 17.
 ```bash
 node scripts/build-single-file-html.js
 node scripts/build-apk.js
 ```
 
 Os arquivos de instalação gerados são:
-- `CatLine.apk` (APK assinado v3.1.0)
-- `CatLine-v3.1.0.apk` (APK versionado)
+- `CatLine.apk` (APK assinado)
+- `CatLine-v3.1.0.apk` (cópia com nome legado)
 - `CatLine-Instalador.apk` (Instalador amigável)
 
 ---

@@ -2,6 +2,58 @@
 
 Todas as alterações notáveis do projeto Cat Line são documentadas neste arquivo.
 
+## [3.3.0] — 2026-11-22
+
+### ✨ Novidades (já no código desde 13/11)
+- Novelo nas notificações (4 estados × 7 cores), avisos escalonados de prazo e reagendamento no boot.
+- Atividades avulsas 1x/2x, visão semanal, aviso de conflito de horário e soneca na notificação.
+- Espelhamento automático de dados com restauração segura via cofre nativo Android.
+
+### 💜 Humor do dia
+- Check-in de humor na aba Hoje, com 5 níveis e resposta da gatinha. Um registro por dia, interruptor próprio e incluído no backup.
+- Depois de 7 dias de registro, o app compara os dias leves com os dias bons em linguagem de coincidência, sem julgamento.
+
+### 💡 Passos prontos e calendário
+- Botão "Sugerir passos" nas metas, com ideias por categoria, 100% offline. A usuária escolhe um a um ou adiciona todos.
+- Importação de arquivos `.ics` na Agenda: converte para o horário de Brasília, entende repetições semanais, mensais e diárias, exceções e remarcações, e não duplica ao importar de novo.
+
+### 📱 Android nativo
+- Seletor de arquivos nativo: "Importar backup" e "Importar .ics" agora abrem o seletor do Android dentro do APK, e "Exportar backup" grava o arquivo pelo seletor de destino. Antes, o WebView não abria input de arquivo nem baixava Blob. Não pede nenhuma permissão de armazenamento.
+- Widget "Hoje" na tela inicial com os próximos 3 compromissos e botão "Feito", pelo mesmo caminho das notificações.
+- Compilado e assinado com o SDK 33 sem erros. Ainda não testado num aparelho.
+
+### 🔒 Bloqueador fora da Play Store
+- Cartão de ativação reescrito: no Android 13 ou mais novo mostra três passos na ordem que o sistema exige, incluindo "Permitir configurações restritas", que só aparece depois de tentar ligar o serviço. Em Android mais antigo mostra dois passos.
+- O botão "Ver como a gatinha bloqueia" agora existe também no APK de release. Antes ele sumia justamente onde a usuária precisa dele.
+- Aviso amarelo quando a economia de bateria pode pausar o bloqueio, com dica por fabricante.
+- Serviço de acessibilidade mais leve: as regras são interpretadas uma vez por mudança, o rótulo dos apps fica em cache, a gravação do diagnóstico é limitada e eventos repetidos do mesmo app em menos de 300 ms são ignorados. Antes, cada rolagem de tela refazia tudo isso.
+- Guia de instalação cobre o aviso do Play Protect, a configuração restrita e a bateria.
+- Modo avançado por ADB: depois de um único comando no computador, `adb shell pm grant com.catline.app android.permission.WRITE_SECURE_SETTINGS`, o botão "Ligar agora" liga o serviço sem passar pelas configurações restritas. O app só acrescenta o próprio serviço à lista de acessibilidade e nunca apaga os de outros apps, como o TalkBack.
+- Opção "Religar o bloqueio sozinho se o Android desligar", desmarcada por padrão, que age ao abrir o app, ao reiniciar e depois de atualizar. Respeita o módulo Foco desligado e o modo descanso.
+
+### 🔔 Avisos que chegam
+- Cada compromisso agora avisa na sua própria data. Antes, o app agendava tudo para o dia de hoje e só quando era aberto, então compromissos de outros dias, inclusive os importados de `.ics`, não avisavam no dia certo, e os de hoje só avisavam se o app fosse aberto naquele dia.
+- Os avisos são reagendados a cada salvamento, em até 7 dias, sem esperar o app voltar para a tela, e só o que mudou é reenviado ao Android.
+- No APK, os avisos ligam sozinhos na primeira abertura. Antes dependiam de um botão escondido na aba Mais, e o botão conferia a API de notificação da web, que não existe no WebView.
+- Cartão de diagnóstico na aba Mais: confere permissão de notificação, alarme exato e economia de bateria, abre a tela certa do Android e tem "Aviso de teste agora" e "Testar em 1 minuto".
+- Alarmes com Intent único por compromisso e estágio, para dois avisos nunca se sobrescreverem. Reagendamento depois de atualizar o app. Alarme exato liberado no Android 13 ou mais novo pela permissão `USE_EXACT_ALARM`.
+- Desligar os avisos ou ativar o modo descanso cancela todos os alarmes pendentes.
+
+### 🐛 Correções
+- Adicionar passo a uma meta pelo formulário salvava sempre o título "Novo Passo" sem estimativa.
+- Marcar um passo como feito, e mover um passo para cima ou para baixo, falhavam porque o app chamava métodos que o motor de metas não tem.
+- Dividir um passo perdia os títulos "Parte 1" e "Parte 2" e as estimativas.
+- Novo teste de contrato garante que toda chamada do app ao motor de metas existe.
+
+### 🔒 Segurança
+- O workflow agora regenera o `CatLine-App.html` antes de compilar o APK, para o APK nunca sair com uma versão defasada do app.
+- Assinatura do APK agora usa keystore informado por variáveis de ambiente (`CATLINE_KEYSTORE`, `CATLINE_KEYSTORE_PASS`); a senha fixa foi removida do código. Sem as variáveis, o build usa uma chave local de desenvolvimento e avisa que não deve ser publicado.
+- Workflow de release só publica quando os segredos de assinatura existem e usa a versão do `versionName` como tag.
+- Todo texto digitado pela usuária passa por `escHtml` antes de entrar em `innerHTML`.
+- Importação de backup rejeita identificadores com aspas, tags ou espaços.
+- WebView sem acesso a arquivos arbitrários nem a content providers; CSP básica (`object-src`, `frame-src`, `base-uri`, `form-action`).
+- Nova suíte `test-phase21-xss.js`.
+
 ## [3.2.0] — 2026-11-11
 
 ### ✨ Novidades e Melhorias

@@ -18,6 +18,7 @@ final class BlockerStore {
     private static final String KEY_CONNECTED_AT = "connected_at";
     private static final String KEY_LAST_BLOCK = "last_block";
     private static final String KEY_SYNC_AT = "sync_at";
+    private static final String KEY_AUTO_ENABLE = "auto_enable";
 
     // Chaves do Banco de Minutos e Módulo Foco (Fase 5)
     private static final String KEY_MINUTE_BANK_BALANCE_SEC = "minute_bank_balance_sec";
@@ -46,15 +47,27 @@ final class BlockerStore {
                 .apply();
     }
 
-    static JSONObject state(Context c) {
+    // O servico de acessibilidade recebe dezenas de eventos por segundo. Interpretar o JSON das regras a cada
+    // evento gastava CPU e bateria, entao o resultado fica guardado enquanto o texto salvo nao mudar.
+    private static String cachedRaw = null;
+    private static JSONObject cachedState = null;
+    private static JSONObject cachedDefault = null;
+
+    static synchronized JSONObject state(Context c) {
         String raw = prefs(c).getString(KEY_STATE, null);
         if (raw != null && !raw.isEmpty()) {
+            if (raw.equals(cachedRaw) && cachedState != null) return cachedState;
             try {
                 JSONObject o = new JSONObject(raw);
-                if (o.optJSONArray("rules") != null) return o;
+                if (o.optJSONArray("rules") != null) {
+                    cachedRaw = raw;
+                    cachedState = o;
+                    return o;
+                }
             } catch (JSONException ignored) {}
         }
-        return defaultState();
+        if (cachedDefault == null) cachedDefault = defaultState();
+        return cachedDefault;
     }
 
     private static JSONObject defaultState() {
@@ -116,6 +129,15 @@ final class BlockerStore {
             }
         }
         ed.apply();
+    }
+
+    // Religar o servico sozinho: so vale se a usuaria ligou a opcao no app. Padrao desligado.
+    static void setAutoEnable(Context c, boolean enabled) {
+        prefs(c).edit().putBoolean(KEY_AUTO_ENABLE, enabled).apply();
+    }
+
+    static boolean isAutoEnable(Context c) {
+        return prefs(c).getBoolean(KEY_AUTO_ENABLE, false);
     }
 
     // Métodos do Banco de Minutos e Módulo Foco (Fase 5)
@@ -195,8 +217,16 @@ final class BlockerStore {
         prefs(c).edit().putLong(KEY_CONNECTED_AT, SystemClock.elapsedRealtime()).apply();
     }
 
+    private static String lastSeenPkg = "";
+    private static long lastSeenWriteAt = 0L;
+
+    /** Registra o ultimo app visto para o diagnostico, no maximo uma gravacao a cada 5 segundos por app. */
     static void markSeen(Context c, String pkg) {
-        prefs(c).edit().putString(KEY_LAST_PKG, pkg).putLong(KEY_LAST_AT, SystemClock.elapsedRealtime()).apply();
+        long now = SystemClock.elapsedRealtime();
+        if (pkg.equals(lastSeenPkg) && now - lastSeenWriteAt < 5000L) return;
+        lastSeenPkg = pkg;
+        lastSeenWriteAt = now;
+        prefs(c).edit().putString(KEY_LAST_PKG, pkg).putLong(KEY_LAST_AT, now).apply();
     }
 
     static void markBlocked(Context c, String pkg) {
