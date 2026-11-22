@@ -4399,7 +4399,7 @@ body.dark-mode .weekly-stat-card {
   const APP_VERSION = '3.2.0';
 
   const ID_KEY = /^(?:id|[A-Za-z]+Id)$/;
-  const UNSAFE_ID_CHARS = /[<>"'`\\<script src="backup-engine.js"></script>\s\u0000-\u001f]/;
+  const UNSAFE_ID_CHARS = /[<>"'`\\$&\s\u0000-\u001f]/;
 
   /**
    * Procura recursivamente por campos de identificador com caracteres perigosos.
@@ -4480,6 +4480,7 @@ body.dark-mode .weekly-stat-card {
         effort: o.effort || 'M',
         reward: typeof o.reward === 'number' ? o.reward : 10,
         delayMin: typeof o.delayMin === 'number' ? o.delayMin : 0,
+        ...(o.icsKey ? { icsKey: String(o.icsKey) } : {}),
         createdAt: o.createdAt || nowIso
       }));
 
@@ -4989,6 +4990,475 @@ body.dark-mode .weekly-stat-card {
     moodInsight,
     weekStrip
   };
+});
+
+</script>
+  <script>
+/**
+ * step-templates.js
+ * Passos prontos para quebrar uma meta em partes pequenas, 100% offline.
+ *
+ * Motor puro: recebe o título da meta e devolve uma sugestão. Nada é aplicado
+ * sem toque da usuária, e a usuária escolhe quais passos adicionar.
+ * Textos sem parênteses descritivos e em tom acolhedor.
+ */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) {
+    module.exports = factory();
+  } else {
+    root.CatLineStepTemplates = factory();
+  }
+})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+  'use strict';
+
+  const TEMPLATES = {
+    ESTUDO: {
+      label: 'Estudo',
+      keywords: ['estud', 'ler ', 'leitur', 'livro', 'aula', 'curso', 'prova', 'concurso', 'resumo', 'tcc', 'faculdade', 'idioma', 'inglês', 'ingles'],
+      steps: [
+        { title: 'Separar o material e uma garrafinha de água', estMinutes: 5 },
+        { title: 'Ler o objetivo da sessão', estMinutes: 5 },
+        { title: 'Estudar com foco total', estMinutes: 25 },
+        { title: 'Pausa para esticar o corpo', estMinutes: 5 },
+        { title: 'Fazer um resumo curtinho do que aprendi', estMinutes: 15 },
+        { title: 'Anotar as dúvidas para a próxima vez', estMinutes: 5 }
+      ]
+    },
+    TREINO: {
+      label: 'Movimento',
+      keywords: ['trein', 'academia', 'corr', 'caminhad', 'exerc', 'calistenia', 'yoga', 'pilates', 'pedal', 'nata', 'alongar'],
+      steps: [
+        { title: 'Separar a roupa e a garrafa de água', estMinutes: 5 },
+        { title: 'Aquecer o corpo', estMinutes: 5 },
+        { title: 'Fazer o bloco principal do treino', estMinutes: 25 },
+        { title: 'Alongar com calma', estMinutes: 5 },
+        { title: 'Beber água e registrar como me senti', estMinutes: 5 }
+      ]
+    },
+    TRABALHO: {
+      label: 'Trabalho',
+      keywords: ['trabalh', 'reuni', 'projeto', 'email', 'e-mail', 'relat', 'cliente', 'entrega', 'apresenta', 'proposta', 'planilha'],
+      steps: [
+        { title: 'Listar o que precisa sair hoje', estMinutes: 10 },
+        { title: 'Escolher a tarefa mais importante', estMinutes: 5 },
+        { title: 'Trabalhar nela sem distrações', estMinutes: 25 },
+        { title: 'Responder o que ficou pendente', estMinutes: 15 },
+        { title: 'Anotar o próximo passo para amanhã', estMinutes: 5 }
+      ]
+    },
+    CASA: {
+      label: 'Casa',
+      keywords: ['organiz', 'limp', 'lavar', 'faxina', 'arrum', 'casa', 'quarto', 'cozinha', 'roupa', 'mudança', 'mudanca', 'banheiro'],
+      steps: [
+        { title: 'Escolher um cantinho para cuidar', estMinutes: 2 },
+        { title: 'Recolher o que está fora do lugar', estMinutes: 10 },
+        { title: 'Limpar a superfície principal', estMinutes: 15 },
+        { title: 'Levar o lixo e o que não uso mais', estMinutes: 5 },
+        { title: 'Admirar o cantinho pronto', estMinutes: 2 }
+      ]
+    },
+    COMENDO_BEBENDO: {
+      label: 'Alimentação',
+      keywords: ['cozinh', 'almoç', 'almoc', 'jantar', 'lanche', 'receita', 'marmita', 'dieta', 'refeição', 'refeicao', 'beber água', 'beber agua'],
+      steps: [
+        { title: 'Escolher o que vou comer', estMinutes: 10 },
+        { title: 'Separar os ingredientes', estMinutes: 10 },
+        { title: 'Preparar com calma', estMinutes: 20 },
+        { title: 'Comer sem pressa e sem telas', estMinutes: 20 },
+        { title: 'Lavar a louça e guardar as sobras', estMinutes: 10 }
+      ]
+    },
+    DESCANSO_SONO: {
+      label: 'Descanso',
+      keywords: ['dorm', 'sono', 'descans', 'relax', 'medit', 'respira', 'soneca'],
+      steps: [
+        { title: 'Deixar o celular longe da cama', estMinutes: 2 },
+        { title: 'Baixar a luz e arrumar o ambiente', estMinutes: 10 },
+        { title: 'Respirar fundo cinco vezes', estMinutes: 3 },
+        { title: 'Descansar sem culpa', estMinutes: 20 }
+      ]
+    },
+    GERAL: {
+      label: 'Geral',
+      keywords: [],
+      steps: [
+        { title: 'Separar o que vou precisar', estMinutes: 5 },
+        { title: 'Começar pela parte mais fácil', estMinutes: 15 },
+        { title: 'Fazer uma pausa curtinha', estMinutes: 5 },
+        { title: 'Continuar até terminar uma parte', estMinutes: 20 },
+        { title: 'Revisar e comemorar com a gatinha', estMinutes: 10 }
+      ]
+    }
+  };
+
+  const ORDER = ['ESTUDO', 'TREINO', 'TRABALHO', 'CASA', 'COMENDO_BEBENDO', 'DESCANSO_SONO'];
+
+  function normalize(text) {
+    return ' ' + String(text == null ? '' : text).toLowerCase().trim() + ' ';
+  }
+
+  /** Categoria com mais palavras-chave encontradas; empate vence a primeira da ordem. */
+  function detectCategory(title) {
+    const t = normalize(title);
+    let best = 'GERAL';
+    let bestScore = 0;
+    ORDER.forEach(cat => {
+      const score = TEMPLATES[cat].keywords.reduce((n, k) => n + (t.includes(k) ? 1 : 0), 0);
+      if (score > bestScore) { best = cat; bestScore = score; }
+    });
+    return best;
+  }
+
+  /**
+   * Sugere passos para a meta. existingTitles evita repetir passos que a usuária já tem.
+   * Devolve cópias, então alterar o resultado nunca muda o catálogo.
+   */
+  function suggestSteps(goalTitle, existingTitles) {
+    const category = detectCategory(goalTitle);
+    const have = new Set((Array.isArray(existingTitles) ? existingTitles : []).map(s => String(s).trim().toLowerCase()));
+    const tpl = TEMPLATES[category];
+    const steps = tpl.steps
+      .filter(s => !have.has(s.title.toLowerCase()))
+      .map(s => ({ title: s.title, estMinutes: s.estMinutes }));
+    return { category, label: tpl.label, steps };
+  }
+
+  return { TEMPLATES, detectCategory, suggestSteps };
+});
+
+</script>
+  <script>
+/**
+ * ics-import-engine.js
+ * Lê arquivos de calendário .ics (iCalendar) e gera compromissos datados da Cat Line.
+ *
+ * Motor puro e 100% offline: não usa relógio, rede nem DOM. Quem chama informa
+ * o primeiro dia da janela (fromDayKey) e quantos dias importar (horizonDays).
+ *
+ * Suporta: DTSTART/DTEND/DURATION, horário UTC, TZID e horário local, RRULE com
+ * DAILY, WEEKLY, MONTHLY e YEARLY, INTERVAL, COUNT, UNTIL, BYDAY simples, EXDATE e
+ * RECURRENCE-ID. Eventos de dia inteiro e cancelados ficam de fora e são contados.
+ * Tudo é convertido para o horário de Brasília, que desde 2019 não tem horário de verão.
+ */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) {
+    module.exports = factory();
+  } else {
+    root.CatLineIcsImport = factory();
+  }
+})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+  'use strict';
+
+  const TARGET_OFFSET_MIN = -180; // America/Sao_Paulo
+  const MAX_INSTANCES = 300;
+  const MAX_FILE_CHARS = 2000000;
+  const MAX_LOOP = 6000;
+  const DAY_MS = 86400000;
+  const WEEKDAYS = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
+
+  // ---------- datas ----------
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function dayKeyFromUtcDate(d) { return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()); }
+  function utcDateFromDayKey(key) {
+    const [y, m, d] = key.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d));
+  }
+  function addDays(key, n) { return dayKeyFromUtcDate(new Date(utcDateFromDayKey(key).getTime() + n * DAY_MS)); }
+  function diffDays(a, b) { return Math.round((utcDateFromDayKey(a).getTime() - utcDateFromDayKey(b).getTime()) / DAY_MS); }
+  function weekday(key) { return utcDateFromDayKey(key).getUTCDay(); }
+
+  /** Offset em minutos da zona em um instante UTC, via Intl. Retorna null se a zona não existir. */
+  function zoneOffsetMinutes(tz, utcMs) {
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit'
+      }).formatToParts(new Date(utcMs));
+      const g = {};
+      parts.forEach(p => { g[p.type] = Number(p.value); });
+      const asUtc = Date.UTC(g.year, g.month - 1, g.day, g.hour, g.minute, g.second);
+      return Math.round((asUtc - utcMs) / 60000);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /** Converte horário de parede em uma zona para o horário de parede de Brasília. */
+  function wallToBrasilia(y, mo, d, h, mi, tz) {
+    const naiveUtc = Date.UTC(y, mo - 1, d, h, mi);
+    let offset = 0;
+    if (tz) {
+      const guess = zoneOffsetMinutes(tz, naiveUtc);
+      if (guess === null) return { ms: naiveUtc }; // zona desconhecida: mantém o horário como está
+      const refined = zoneOffsetMinutes(tz, naiveUtc - guess * 60000);
+      offset = refined === null ? guess : refined;
+      return { ms: naiveUtc - offset * 60000 + TARGET_OFFSET_MIN * 60000 };
+    }
+    return { ms: naiveUtc };
+  }
+
+  /** Interpreta o valor de DTSTART/DTEND/UNTIL/EXDATE. Retorna {dayKey, time, allDay, ms}. */
+  function parseDateValue(value, params) {
+    const m = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?)?(Z)?$/.exec(String(value || '').trim());
+    if (!m) return null;
+    const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+    const hasTime = m[4] !== undefined && !(params && String(params.VALUE || '').toUpperCase() === 'DATE');
+    if (!hasTime) {
+      const key = y + '-' + pad(mo) + '-' + pad(d);
+      return { dayKey: key, time: null, allDay: true, ms: Date.UTC(y, mo - 1, d) };
+    }
+    const h = Number(m[4]), mi = Number(m[5]);
+    let ms;
+    if (m[7]) {
+      ms = Date.UTC(y, mo - 1, d, h, mi) + TARGET_OFFSET_MIN * 60000;
+    } else {
+      ms = wallToBrasilia(y, mo, d, h, mi, params && params.TZID ? params.TZID : null).ms;
+    }
+    const local = new Date(ms);
+    return { dayKey: dayKeyFromUtcDate(local), time: pad(local.getUTCHours()) + ':' + pad(local.getUTCMinutes()), allDay: false, ms };
+  }
+
+  function parseDuration(value) {
+    const m = /^P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/.exec(String(value || '').trim());
+    if (!m) return null;
+    return (Number(m[1] || 0) * 7 * 1440) + (Number(m[2] || 0) * 1440) + (Number(m[3] || 0) * 60) + Number(m[4] || 0);
+  }
+
+  // ---------- texto ----------
+  function unescapeText(s) {
+    return String(s || '').replace(/\\n/gi, ' ').replace(/\\([,;\\])/g, '$1');
+  }
+  function cleanTitle(s) {
+    const t = unescapeText(s).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+    return (t || 'Compromisso do calendário').slice(0, 80);
+  }
+
+  // ---------- leitura do arquivo ----------
+  function parseProperty(line) {
+    const idx = line.indexOf(':');
+    if (idx < 1) return null;
+    const left = line.slice(0, idx);
+    const value = line.slice(idx + 1);
+    const segs = left.split(';');
+    const name = segs[0].toUpperCase();
+    const params = {};
+    segs.slice(1).forEach(p => {
+      const eq = p.indexOf('=');
+      if (eq > 0) params[p.slice(0, eq).toUpperCase()] = p.slice(eq + 1).replace(/^"|"$/g, '');
+    });
+    return { name, params, value };
+  }
+
+  function parseRrule(value) {
+    const rule = {};
+    String(value || '').split(';').forEach(part => {
+      const eq = part.indexOf('=');
+      if (eq > 0) rule[part.slice(0, eq).toUpperCase()] = part.slice(eq + 1);
+    });
+    return rule;
+  }
+
+  /** Lê o texto do .ics e devolve os eventos brutos. */
+  function parseIcs(text) {
+    const raw = String(text == null ? '' : text).slice(0, MAX_FILE_CHARS);
+    const lines = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\n[ \t]/g, '').split('\n');
+    const events = [];
+    let ev = null;
+    let alarmDepth = 0;
+    lines.forEach(line => {
+      const upper = line.trim().toUpperCase();
+      if (upper === 'BEGIN:VEVENT') { ev = { exdates: [] }; alarmDepth = 0; return; }
+      if (!ev) return;
+      if (upper === 'END:VEVENT') { events.push(ev); ev = null; return; }
+      if (upper === 'BEGIN:VALARM') { alarmDepth++; return; }
+      if (upper === 'END:VALARM') { alarmDepth = Math.max(0, alarmDepth - 1); return; }
+      if (alarmDepth > 0) return;
+      const prop = parseProperty(line);
+      if (!prop) return;
+      switch (prop.name) {
+        case 'UID': ev.uid = prop.value.trim(); break;
+        case 'SUMMARY': ev.summary = prop.value; break;
+        case 'STATUS': ev.status = prop.value.trim().toUpperCase(); break;
+        case 'DTSTART': ev.start = parseDateValue(prop.value, prop.params); break;
+        case 'DTEND': ev.end = parseDateValue(prop.value, prop.params); break;
+        case 'DURATION': ev.durationMin = parseDuration(prop.value); break;
+        case 'RRULE': ev.rrule = parseRrule(prop.value); break;
+        case 'RECURRENCE-ID': ev.recurrenceId = parseDateValue(prop.value, prop.params); break;
+        case 'EXDATE':
+          prop.value.split(',').forEach(v => {
+            const d = parseDateValue(v, prop.params);
+            if (d) ev.exdates.push(d.dayKey);
+          });
+          break;
+        default: break;
+      }
+    });
+    return events;
+  }
+
+  // ---------- expansão ----------
+  function untilKey(rule) {
+    if (!rule.UNTIL) return null;
+    const d = parseDateValue(rule.UNTIL, {});
+    return d ? d.dayKey : null;
+  }
+
+  /** Dias (dayKey) em que o evento acontece dentro da janela, respeitando COUNT, UNTIL e exceções. */
+  function expandDays(ev, windowStart, windowEnd, excluded) {
+    const first = ev.start.dayKey;
+    const rule = ev.rrule;
+    const out = [];
+    const push = key => { if (key >= windowStart && key <= windowEnd && !excluded.has(key)) out.push(key); };
+
+    if (!rule || !rule.FREQ) { push(first); return out; }
+
+    const interval = Math.max(1, parseInt(rule.INTERVAL || '1', 10) || 1);
+    const count = rule.COUNT ? Math.max(1, parseInt(rule.COUNT, 10) || 1) : null;
+    const until = untilKey(rule);
+    const freq = rule.FREQ.toUpperCase();
+    const byDay = rule.BYDAY
+      ? rule.BYDAY.split(',').map(s => s.trim().toUpperCase().replace(/^[+-]?\d+/, '')).filter(s => s in WEEKDAYS).map(s => WEEKDAYS[s])
+      : null;
+
+    let generated = 0;
+    let guard = 0;
+    const done = key => (until && key > until) || key > windowEnd;
+
+    if (freq === 'DAILY') {
+      for (let key = first; !done(key) && guard++ < MAX_LOOP; key = addDays(key, interval)) {
+        if (count !== null && generated >= count) break;
+        generated++; push(key);
+      }
+    } else if (freq === 'WEEKLY') {
+      const days = byDay && byDay.length ? byDay : [weekday(first)];
+      const startOfWeek = addDays(first, -((weekday(first) + 6) % 7)); // segunda-feira
+      for (let key = first; !done(key) && guard++ < MAX_LOOP; key = addDays(key, 1)) {
+        const weeksSince = Math.floor(diffDays(key, startOfWeek) / 7);
+        if (weeksSince % interval !== 0) continue;
+        if (!days.includes(weekday(key))) continue;
+        if (count !== null && generated >= count) break;
+        generated++; push(key);
+      }
+    } else if (freq === 'MONTHLY' || freq === 'YEARLY') {
+      const [fy, fm, fd] = first.split('-').map(Number);
+      const step = freq === 'MONTHLY' ? interval : interval * 12;
+      for (let n = 0; guard++ < MAX_LOOP; n++) {
+        const total = (fm - 1) + n * step;
+        const y = fy + Math.floor(total / 12);
+        const mo = (total % 12) + 1;
+        const lastDay = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+        if (fd > lastDay) continue; // dia inexistente neste mês, por exemplo 31
+        const key = y + '-' + pad(mo) + '-' + pad(fd);
+        if (done(key)) break;
+        if (count !== null && generated >= count) break;
+        generated++; push(key);
+      }
+    } else {
+      push(first); // frequência não suportada: só a primeira ocorrência
+    }
+    return out;
+  }
+
+  /**
+   * Converte o texto do .ics em ocorrências datadas.
+   * options: { fromDayKey (obrigatório), horizonDays (padrão 60) }
+   */
+  function importFromIcs(text, options) {
+    const opts = options || {};
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(opts.fromDayKey || '')) throw new Error('fromDayKey inválido');
+    const horizon = Math.max(1, Math.min(366, opts.horizonDays || 60));
+    const windowStart = opts.fromDayKey;
+    const windowEnd = addDays(windowStart, horizon);
+
+    const events = parseIcs(text);
+    const summary = { events: events.length, skippedAllDay: 0, skippedCancelled: 0, skippedInvalid: 0, truncated: false };
+
+    // Instâncias alteradas de séries: a série não repete naquele dia
+    const overridden = new Map();
+    events.forEach(ev => {
+      if (ev.recurrenceId && ev.uid) {
+        if (!overridden.has(ev.uid)) overridden.set(ev.uid, new Set());
+        overridden.get(ev.uid).add(ev.recurrenceId.dayKey);
+      }
+    });
+
+    const items = [];
+    events.forEach((ev, idx) => {
+      if (ev.status === 'CANCELLED') { summary.skippedCancelled++; return; }
+      if (!ev.start) { summary.skippedInvalid++; return; }
+      if (ev.start.allDay) { summary.skippedAllDay++; return; }
+
+      let minutes = 30;
+      if (ev.end && !ev.end.allDay) minutes = Math.round((ev.end.ms - ev.start.ms) / 60000);
+      else if (Number.isFinite(ev.durationMin)) minutes = ev.durationMin;
+      if (!Number.isFinite(minutes) || minutes <= 0) minutes = 30;
+      minutes = Math.max(5, Math.min(480, minutes));
+
+      const excluded = new Set(ev.exdates);
+      if (ev.uid && overridden.has(ev.uid) && !ev.recurrenceId) overridden.get(ev.uid).forEach(k => excluded.add(k));
+
+      const uid = ev.uid || ('sem-uid-' + idx + '-' + (ev.summary || ''));
+      const title = cleanTitle(ev.summary);
+      expandDays(ev, windowStart, windowEnd, excluded).forEach(dayKey => {
+        items.push({ key: 'ics:' + uid + ':' + dayKey + 'T' + ev.start.time, title, date: dayKey, time: ev.start.time, plannedMinutes: minutes });
+      });
+    });
+
+    items.sort((a, b) => (a.date + a.time < b.date + b.time ? -1 : a.date + a.time > b.date + b.time ? 1 : 0));
+    if (items.length > MAX_INSTANCES) { items.length = MAX_INSTANCES; summary.truncated = true; }
+    summary.instances = items.length;
+    summary.windowStart = windowStart;
+    summary.windowEnd = windowEnd;
+    return { items, summary };
+  }
+
+  // ---------- integração com o app ----------
+  function hash(s) {
+    let h = 5381;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+    return h.toString(36);
+  }
+
+  /** Id seguro para atributos HTML: só letras, números, _ e -. */
+  function safeId(key) {
+    return 'ics_' + key.replace(/[^A-Za-z0-9]+/g, '_').slice(0, 40) + '_' + hash(key);
+  }
+
+  /** Cria ocorrências no formato do app, pulando as já importadas antes. */
+  function toOccurrences(items, existingOccurrences) {
+    const have = new Set((Array.isArray(existingOccurrences) ? existingOccurrences : []).map(o => o && o.icsKey).filter(Boolean));
+    const out = [];
+    let duplicates = 0;
+    (items || []).forEach(it => {
+      if (have.has(it.key)) { duplicates++; return; }
+      have.add(it.key);
+      out.push({
+        id: safeId(it.key),
+        icsKey: it.key,
+        title: it.title,
+        time: it.time,
+        plannedStart: it.date + 'T' + it.time + ':00',
+        plannedZone: 'America/Sao_Paulo',
+        plannedMinutes: it.plannedMinutes,
+        goalId: null,
+        stepId: null,
+        effort: it.plannedMinutes >= 60 ? 'G' : (it.plannedMinutes >= 30 ? 'M' : 'P'),
+        reward: it.plannedMinutes >= 60 ? 20 : (it.plannedMinutes >= 30 ? 10 : 5),
+        estimatedDuration: it.plannedMinutes,
+        recurrence: 'Data específica',
+        maxRuns: 0,
+        completedRuns: 0,
+        notes: '',
+        date: it.date,
+        state: 'pending',
+        delayMin: 0
+      });
+    });
+    return { occurrences: out, duplicates };
+  }
+
+  return { parseIcs, importFromIcs, toOccurrences, safeId, parseDateValue };
 });
 
 </script>
@@ -8167,8 +8637,6 @@ class AppUI {
     if (goal) {
       if (typeof goalStepEngine !== 'undefined' && goalStepEngine && typeof goalStepEngine.completeStep === 'function') {
         goalStepEngine.completeStep(goal, stepId);
-      } else if (typeof goalStepEngine !== 'undefined' && goalStepEngine && typeof goalStepEngine.toggleStepDone === 'function') {
-        goalStepEngine.toggleStepDone(goal, stepId);
       } else {
         const step = (goal.steps || []).find(s => s.id === stepId);
         if (step) {
@@ -9776,6 +10244,14 @@ class AppUI {
 
     this.contentEl.innerHTML = `
       ${this.renderAgendaWeekStrip(selDay)}
+      ${typeof CatLineIcsImport !== 'undefined' ? `
+        <div class="pixel-card cream" style="padding: 10px 12px; margin-bottom: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px; justify-content: space-between;">
+            <span style="font-size: 13px; line-height: 1.3;">📥 Já usa outra agenda? Traga seus compromissos de um arquivo de calendário.</span>
+            <button class="pixel-btn btn-sm btn-purple" style="min-height: 44px; white-space: nowrap;" onclick="window.app.triggerImportIcs()">Importar .ics</button>
+          </div>
+          <input type="file" id="ics-import-input" style="display: none;" accept=".ics,text/calendar" onchange="window.app.importIcsFile(event)">
+        </div>` : ''}
       <div class="pixel-card">
         <h4>📅 Agenda · Novo Compromisso</h4>
         <p style="font-size: 14px; color: ${PALETTE.grayDark}; margin-bottom: 10px;">Defina título, horário, esforço, duração estimada e frequência recorrente:</p>
@@ -9985,6 +10461,54 @@ class AppUI {
     this.setCatSpeech(`Compromisso "${title}" adicionado.`);
     this.renderActiveTab();
     this.persist();
+  }
+
+  // Importação de calendário .ics, 100% local. Nada é salvo sem confirmação.
+  triggerImportIcs() {
+    const input = document.getElementById('ics-import-input');
+    if (input) input.click();
+  }
+
+  importIcsFile(event) {
+    const input = event && event.target;
+    const file = input && input.files && input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const horizonDays = 60;
+        const parsed = CatLineIcsImport.importFromIcs(String(e.target.result || ''), { fromDayKey: state.dayKey, horizonDays });
+        const conv = CatLineIcsImport.toOccurrences(parsed.items, state.occurrences);
+        const s = parsed.summary;
+        if (s.events === 0) {
+          alert('Não encontrei compromissos nesse arquivo. Confira se ele é um calendário no formato .ics.');
+          return;
+        }
+        if (conv.occurrences.length === 0) {
+          alert(conv.duplicates > 0
+            ? 'Esses compromissos já estão na sua agenda. Nada foi repetido.'
+            : `Não há compromissos com horário nos próximos ${horizonDays} dias.`);
+          return;
+        }
+        let msg = `Encontrei ${conv.occurrences.length} compromissos nos próximos ${horizonDays} dias. Importar para a agenda?`;
+        if (conv.duplicates > 0) msg += `\n${conv.duplicates} já estavam na agenda e serão pulados.`;
+        if (s.skippedAllDay > 0) msg += `\n${s.skippedAllDay} eventos de dia inteiro ficam de fora.`;
+        if (s.truncated) msg += '\nO arquivo é grande, então importei só os primeiros 300.';
+        if (typeof confirm === 'function' && !confirm(msg)) return;
+
+        state.occurrences = state.occurrences.concat(conv.occurrences);
+        audio.playMeowCelebrate();
+        this.setCatSpeech(`Pronto! ${conv.occurrences.length} compromissos chegaram na sua agenda.`);
+        this.renderActiveTab();
+        this.persist();
+      } catch (err) {
+        if (typeof console !== 'undefined' && console.error) console.error('importIcsFile error:', err);
+        alert('Não consegui ler esse arquivo de calendário.');
+      } finally {
+        if (input) input.value = '';
+      }
+    };
+    reader.readAsText(file);
   }
 
   // CRUD de Hábitos
@@ -10320,6 +10844,77 @@ class AppUI {
     this.persist();
   }
 
+  // Passos prontos por categoria, 100% offline. Nada entra na meta sem toque da usuária.
+  renderStepSuggestionsHtml(g) {
+    if (typeof CatLineStepTemplates === 'undefined') return '';
+    const sug = state.stepSuggestions;
+    if (!sug || sug.goalId !== g.id) {
+      return `
+        <div style="margin-bottom: 8px;">
+          <button class="pixel-btn btn-sm btn-purple" style="min-height: 44px;" onclick="window.app.suggestStepsForGoal('${g.id}')">💡 Sugerir passos</button>
+        </div>`;
+    }
+    const items = sug.steps.map((s, i) => `
+      <div style="display: flex; align-items: center; gap: 6px; padding: 4px 0;">
+        <span style="flex: 1; font-size: 13px; line-height: 1.3;">${escHtml(s.title)} · ${s.estMinutes} min</span>
+        <button class="pixel-btn btn-sm btn-green" style="min-height: 40px; min-width: 48px;" onclick="window.app.addSuggestedStep('${g.id}', ${i})" aria-label="Adicionar este passo">+</button>
+      </div>`).join('');
+    return `
+      <div class="pixel-card cream" style="margin-bottom: 8px; padding: 8px 10px;">
+        <div style="font-size: 13px; font-weight: 700; margin-bottom: 4px;">💡 Ideias de passos · ${escHtml(sug.label)}</div>
+        ${items || '<div style="font-size: 13px;">Você já tem todos os passos sugeridos!</div>'}
+        <div style="display: flex; gap: 6px; margin-top: 6px;">
+          ${items ? `<button class="pixel-btn btn-sm btn-green" style="min-height: 40px;" onclick="window.app.addAllSuggestedSteps('${g.id}')">Adicionar todos</button>` : ''}
+          <button class="pixel-btn btn-sm btn-secondary" style="min-height: 40px;" onclick="window.app.closeStepSuggestions()">Fechar</button>
+        </div>
+      </div>`;
+  }
+
+  suggestStepsForGoal(goalId) {
+    const goal = state.goals.find(g => g.id === goalId);
+    if (!goal || typeof CatLineStepTemplates === 'undefined') return;
+    const existing = (goal.steps || []).filter(s => !s.archived).map(s => s.title);
+    const result = CatLineStepTemplates.suggestSteps(goal.title, existing);
+    state.stepSuggestions = { goalId, label: result.label, steps: result.steps };
+    audio.playBlip();
+    this.renderTabMetas();
+  }
+
+  _addSuggestedStepNoRender(goal, step) {
+    if (goalStepEngine) goalStepEngine.addStep(goal, { title: step.title, estMinutes: step.estMinutes });
+  }
+
+  addSuggestedStep(goalId, index) {
+    const goal = state.goals.find(g => g.id === goalId);
+    const sug = state.stepSuggestions;
+    if (!goal || !sug || sug.goalId !== goalId || !sug.steps[index]) return;
+    const step = sug.steps[index];
+    this._addSuggestedStepNoRender(goal, step);
+    sug.steps.splice(index, 1);
+    audio.playBlip();
+    this.setCatSpeech(`Passo "${step.title}" adicionado à meta!`);
+    this.renderTabMetas();
+    this.persist();
+  }
+
+  addAllSuggestedSteps(goalId) {
+    const goal = state.goals.find(g => g.id === goalId);
+    const sug = state.stepSuggestions;
+    if (!goal || !sug || sug.goalId !== goalId) return;
+    sug.steps.forEach(s => this._addSuggestedStepNoRender(goal, s));
+    const n = sug.steps.length;
+    state.stepSuggestions = null;
+    audio.playMeowGreeting();
+    this.setCatSpeech(`${n} passos adicionados! Agora é só ir puxando o fio, um de cada vez.`);
+    this.renderTabMetas();
+    this.persist();
+  }
+
+  closeStepSuggestions() {
+    state.stepSuggestions = null;
+    this.renderTabMetas();
+  }
+
   // Gestão de Passos de Metas (v3.2.0 · Prompt 8)
   addStepToGoal(goalId) {
     const goal = state.goals.find(g => g.id === goalId);
@@ -10331,7 +10926,7 @@ class AppUI {
     if (!title) return;
 
     if (goalStepEngine) {
-      goalStepEngine.addStep(goal, title, estMinutes);
+      goalStepEngine.addStep(goal, { title, estMinutes: Number.isFinite(estMinutes) ? estMinutes : null });
     } else {
       if (!goal.steps) goal.steps = [];
       const order = goal.steps.length + 1;
@@ -10400,7 +10995,11 @@ class AppUI {
 
     const newOrder = step.order + delta;
     if (goalStepEngine) {
-      goalStepEngine.reorderStep(goal, stepId, newOrder);
+      const ids = goal.steps.slice().sort((a, b) => a.order - b.order).map(s => s.id);
+      const from = ids.indexOf(stepId);
+      const to = Math.max(0, Math.min(ids.length - 1, from + delta));
+      ids.splice(to, 0, ids.splice(from, 1)[0]);
+      goalStepEngine.reorderSteps(goal, ids);
     } else {
       step.order = Math.max(1, newOrder);
       goal.steps.sort((a, b) => a.order - b.order);
@@ -10422,7 +11021,12 @@ class AppUI {
     const halfEst = step.estMinutes ? Math.max(5, Math.round(step.estMinutes / 2)) : null;
 
     if (goalStepEngine) {
-      goalStepEngine.splitStep(goal, stepId, title1, title2, halfEst, halfEst);
+      goalStepEngine.splitStep(goal, stepId, {
+        firstTitle: title1,
+        secondTitle: title2,
+        firstEstMinutes: halfEst,
+        secondEstMinutes: halfEst
+      });
     } else {
       step.title = title1;
       step.estMinutes = halfEst;
@@ -10472,7 +11076,8 @@ class AppUI {
     const nowIso = Clock.isoString();
 
     if (goalStepEngine) {
-      goalStepEngine.toggleStepDone(goal, stepId, willBeDone ? nowIso : null);
+      if (willBeDone) goalStepEngine.completeStep(goal, stepId);
+      else goalStepEngine.uncompleteStep(goal, stepId);
     } else {
       step.doneAt = willBeDone ? nowIso : null;
     }
@@ -10679,6 +11284,8 @@ class AppUI {
                       `;
                     }).join('')}
                   </div>
+
+                  ${this.renderStepSuggestionsHtml(g)}
 
                   <!-- Form para Adicionar Passo -->
                   <div style="display: flex; gap: 6px; align-items: center;">

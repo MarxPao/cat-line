@@ -27,7 +27,10 @@ const testScripts = [
   'test-phase19-backup-schema-v2.js',
   'test-phase20-final-regression.js',
   'test-phase21-xss.js',
-  'test-phase22-mood.js'
+  'test-phase22-mood.js',
+  'test-phase23-step-templates.js',
+  'test-phase24-ics-import.js',
+  'test-phase25-single-file.js'
 ];
 
 console.log('🐾 [Cat Line] Executando suíte completa de testes automatizados...\n');

@@ -3172,8 +3172,6 @@ class AppUI {
     if (goal) {
       if (typeof goalStepEngine !== 'undefined' && goalStepEngine && typeof goalStepEngine.completeStep === 'function') {
         goalStepEngine.completeStep(goal, stepId);
-      } else if (typeof goalStepEngine !== 'undefined' && goalStepEngine && typeof goalStepEngine.toggleStepDone === 'function') {
-        goalStepEngine.toggleStepDone(goal, stepId);
       } else {
         const step = (goal.steps || []).find(s => s.id === stepId);
         if (step) {
@@ -4781,6 +4779,14 @@ class AppUI {
 
     this.contentEl.innerHTML = `
       ${this.renderAgendaWeekStrip(selDay)}
+      ${typeof CatLineIcsImport !== 'undefined' ? `
+        <div class="pixel-card cream" style="padding: 10px 12px; margin-bottom: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px; justify-content: space-between;">
+            <span style="font-size: 13px; line-height: 1.3;">📥 Já usa outra agenda? Traga seus compromissos de um arquivo de calendário.</span>
+            <button class="pixel-btn btn-sm btn-purple" style="min-height: 44px; white-space: nowrap;" onclick="window.app.triggerImportIcs()">Importar .ics</button>
+          </div>
+          <input type="file" id="ics-import-input" style="display: none;" accept=".ics,text/calendar" onchange="window.app.importIcsFile(event)">
+        </div>` : ''}
       <div class="pixel-card">
         <h4>📅 Agenda · Novo Compromisso</h4>
         <p style="font-size: 14px; color: ${PALETTE.grayDark}; margin-bottom: 10px;">Defina título, horário, esforço, duração estimada e frequência recorrente:</p>
@@ -4990,6 +4996,54 @@ class AppUI {
     this.setCatSpeech(`Compromisso "${title}" adicionado.`);
     this.renderActiveTab();
     this.persist();
+  }
+
+  // Importação de calendário .ics, 100% local. Nada é salvo sem confirmação.
+  triggerImportIcs() {
+    const input = document.getElementById('ics-import-input');
+    if (input) input.click();
+  }
+
+  importIcsFile(event) {
+    const input = event && event.target;
+    const file = input && input.files && input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const horizonDays = 60;
+        const parsed = CatLineIcsImport.importFromIcs(String(e.target.result || ''), { fromDayKey: state.dayKey, horizonDays });
+        const conv = CatLineIcsImport.toOccurrences(parsed.items, state.occurrences);
+        const s = parsed.summary;
+        if (s.events === 0) {
+          alert('Não encontrei compromissos nesse arquivo. Confira se ele é um calendário no formato .ics.');
+          return;
+        }
+        if (conv.occurrences.length === 0) {
+          alert(conv.duplicates > 0
+            ? 'Esses compromissos já estão na sua agenda. Nada foi repetido.'
+            : `Não há compromissos com horário nos próximos ${horizonDays} dias.`);
+          return;
+        }
+        let msg = `Encontrei ${conv.occurrences.length} compromissos nos próximos ${horizonDays} dias. Importar para a agenda?`;
+        if (conv.duplicates > 0) msg += `\n${conv.duplicates} já estavam na agenda e serão pulados.`;
+        if (s.skippedAllDay > 0) msg += `\n${s.skippedAllDay} eventos de dia inteiro ficam de fora.`;
+        if (s.truncated) msg += '\nO arquivo é grande, então importei só os primeiros 300.';
+        if (typeof confirm === 'function' && !confirm(msg)) return;
+
+        state.occurrences = state.occurrences.concat(conv.occurrences);
+        audio.playMeowCelebrate();
+        this.setCatSpeech(`Pronto! ${conv.occurrences.length} compromissos chegaram na sua agenda.`);
+        this.renderActiveTab();
+        this.persist();
+      } catch (err) {
+        if (typeof console !== 'undefined' && console.error) console.error('importIcsFile error:', err);
+        alert('Não consegui ler esse arquivo de calendário.');
+      } finally {
+        if (input) input.value = '';
+      }
+    };
+    reader.readAsText(file);
   }
 
   // CRUD de Hábitos
@@ -5325,6 +5379,77 @@ class AppUI {
     this.persist();
   }
 
+  // Passos prontos por categoria, 100% offline. Nada entra na meta sem toque da usuária.
+  renderStepSuggestionsHtml(g) {
+    if (typeof CatLineStepTemplates === 'undefined') return '';
+    const sug = state.stepSuggestions;
+    if (!sug || sug.goalId !== g.id) {
+      return `
+        <div style="margin-bottom: 8px;">
+          <button class="pixel-btn btn-sm btn-purple" style="min-height: 44px;" onclick="window.app.suggestStepsForGoal('${g.id}')">💡 Sugerir passos</button>
+        </div>`;
+    }
+    const items = sug.steps.map((s, i) => `
+      <div style="display: flex; align-items: center; gap: 6px; padding: 4px 0;">
+        <span style="flex: 1; font-size: 13px; line-height: 1.3;">${escHtml(s.title)} · ${s.estMinutes} min</span>
+        <button class="pixel-btn btn-sm btn-green" style="min-height: 40px; min-width: 48px;" onclick="window.app.addSuggestedStep('${g.id}', ${i})" aria-label="Adicionar este passo">+</button>
+      </div>`).join('');
+    return `
+      <div class="pixel-card cream" style="margin-bottom: 8px; padding: 8px 10px;">
+        <div style="font-size: 13px; font-weight: 700; margin-bottom: 4px;">💡 Ideias de passos · ${escHtml(sug.label)}</div>
+        ${items || '<div style="font-size: 13px;">Você já tem todos os passos sugeridos!</div>'}
+        <div style="display: flex; gap: 6px; margin-top: 6px;">
+          ${items ? `<button class="pixel-btn btn-sm btn-green" style="min-height: 40px;" onclick="window.app.addAllSuggestedSteps('${g.id}')">Adicionar todos</button>` : ''}
+          <button class="pixel-btn btn-sm btn-secondary" style="min-height: 40px;" onclick="window.app.closeStepSuggestions()">Fechar</button>
+        </div>
+      </div>`;
+  }
+
+  suggestStepsForGoal(goalId) {
+    const goal = state.goals.find(g => g.id === goalId);
+    if (!goal || typeof CatLineStepTemplates === 'undefined') return;
+    const existing = (goal.steps || []).filter(s => !s.archived).map(s => s.title);
+    const result = CatLineStepTemplates.suggestSteps(goal.title, existing);
+    state.stepSuggestions = { goalId, label: result.label, steps: result.steps };
+    audio.playBlip();
+    this.renderTabMetas();
+  }
+
+  _addSuggestedStepNoRender(goal, step) {
+    if (goalStepEngine) goalStepEngine.addStep(goal, { title: step.title, estMinutes: step.estMinutes });
+  }
+
+  addSuggestedStep(goalId, index) {
+    const goal = state.goals.find(g => g.id === goalId);
+    const sug = state.stepSuggestions;
+    if (!goal || !sug || sug.goalId !== goalId || !sug.steps[index]) return;
+    const step = sug.steps[index];
+    this._addSuggestedStepNoRender(goal, step);
+    sug.steps.splice(index, 1);
+    audio.playBlip();
+    this.setCatSpeech(`Passo "${step.title}" adicionado à meta!`);
+    this.renderTabMetas();
+    this.persist();
+  }
+
+  addAllSuggestedSteps(goalId) {
+    const goal = state.goals.find(g => g.id === goalId);
+    const sug = state.stepSuggestions;
+    if (!goal || !sug || sug.goalId !== goalId) return;
+    sug.steps.forEach(s => this._addSuggestedStepNoRender(goal, s));
+    const n = sug.steps.length;
+    state.stepSuggestions = null;
+    audio.playMeowGreeting();
+    this.setCatSpeech(`${n} passos adicionados! Agora é só ir puxando o fio, um de cada vez.`);
+    this.renderTabMetas();
+    this.persist();
+  }
+
+  closeStepSuggestions() {
+    state.stepSuggestions = null;
+    this.renderTabMetas();
+  }
+
   // Gestão de Passos de Metas (v3.2.0 · Prompt 8)
   addStepToGoal(goalId) {
     const goal = state.goals.find(g => g.id === goalId);
@@ -5336,7 +5461,7 @@ class AppUI {
     if (!title) return;
 
     if (goalStepEngine) {
-      goalStepEngine.addStep(goal, title, estMinutes);
+      goalStepEngine.addStep(goal, { title, estMinutes: Number.isFinite(estMinutes) ? estMinutes : null });
     } else {
       if (!goal.steps) goal.steps = [];
       const order = goal.steps.length + 1;
@@ -5405,7 +5530,11 @@ class AppUI {
 
     const newOrder = step.order + delta;
     if (goalStepEngine) {
-      goalStepEngine.reorderStep(goal, stepId, newOrder);
+      const ids = goal.steps.slice().sort((a, b) => a.order - b.order).map(s => s.id);
+      const from = ids.indexOf(stepId);
+      const to = Math.max(0, Math.min(ids.length - 1, from + delta));
+      ids.splice(to, 0, ids.splice(from, 1)[0]);
+      goalStepEngine.reorderSteps(goal, ids);
     } else {
       step.order = Math.max(1, newOrder);
       goal.steps.sort((a, b) => a.order - b.order);
@@ -5427,7 +5556,12 @@ class AppUI {
     const halfEst = step.estMinutes ? Math.max(5, Math.round(step.estMinutes / 2)) : null;
 
     if (goalStepEngine) {
-      goalStepEngine.splitStep(goal, stepId, title1, title2, halfEst, halfEst);
+      goalStepEngine.splitStep(goal, stepId, {
+        firstTitle: title1,
+        secondTitle: title2,
+        firstEstMinutes: halfEst,
+        secondEstMinutes: halfEst
+      });
     } else {
       step.title = title1;
       step.estMinutes = halfEst;
@@ -5477,7 +5611,8 @@ class AppUI {
     const nowIso = Clock.isoString();
 
     if (goalStepEngine) {
-      goalStepEngine.toggleStepDone(goal, stepId, willBeDone ? nowIso : null);
+      if (willBeDone) goalStepEngine.completeStep(goal, stepId);
+      else goalStepEngine.uncompleteStep(goal, stepId);
     } else {
       step.doneAt = willBeDone ? nowIso : null;
     }
@@ -5684,6 +5819,8 @@ class AppUI {
                       `;
                     }).join('')}
                   </div>
+
+                  ${this.renderStepSuggestionsHtml(g)}
 
                   <!-- Form para Adicionar Passo -->
                   <div style="display: flex; gap: 6px; align-items: center;">

@@ -105,6 +105,7 @@
         effort: o.effort || 'M',
         reward: typeof o.reward === 'number' ? o.reward : 10,
         delayMin: typeof o.delayMin === 'number' ? o.delayMin : 0,
+        ...(o.icsKey ? { icsKey: String(o.icsKey) } : {}),
         createdAt: o.createdAt || nowIso
       }));
 

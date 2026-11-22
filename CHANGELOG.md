@@ -13,6 +13,16 @@ Todas as alterações notáveis do projeto Cat Line são documentadas neste arqu
 - Check-in de humor na aba Hoje, com 5 níveis e resposta da gatinha. Um registro por dia, interruptor próprio e incluído no backup.
 - Depois de 7 dias de registro, o app compara os dias leves com os dias bons em linguagem de coincidência, sem julgamento.
 
+### 💡 Passos prontos e calendário
+- Botão "Sugerir passos" nas metas, com ideias por categoria, 100% offline. A usuária escolhe um a um ou adiciona todos.
+- Importação de arquivos `.ics` na Agenda: converte para o horário de Brasília, entende repetições semanais, mensais e diárias, exceções e remarcações, e não duplica ao importar de novo.
+
+### 🐛 Correções
+- Adicionar passo a uma meta pelo formulário salvava sempre o título "Novo Passo" sem estimativa.
+- Marcar um passo como feito, e mover um passo para cima ou para baixo, falhavam porque o app chamava métodos que o motor de metas não tem.
+- Dividir um passo perdia os títulos "Parte 1" e "Parte 2" e as estimativas.
+- Novo teste de contrato garante que toda chamada do app ao motor de metas existe.
+
 ### 🔒 Segurança
 - O workflow agora regenera o `CatLine-App.html` antes de compilar o APK, para o APK nunca sair com uma versão defasada do app.
 - Assinatura do APK agora usa keystore informado por variáveis de ambiente (`CATLINE_KEYSTORE`, `CATLINE_KEYSTORE_PASS`); a senha fixa foi removida do código. Sem as variáveis, o build usa uma chave local de desenvolvimento e avisa que não deve ser publicado.
