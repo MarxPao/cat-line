@@ -285,6 +285,11 @@ execSync(`${AAPT2} link --java "${GEN_DIR}" -I ${ANDROID_JAR} --manifest "${mani
 
 // 7. Compila código Java para bytecode Java 8 (52.0)
 console.log("7. Compilando código nativo Java (target 1.8)...");
+// Classes internas se chamam BlockActivity$1.class. Entre aspas duplas, o shell do Linux e do macOS expande "$1" para
+// vazio e o D8 recebe a mesma classe duas vezes. No Windows (cmd) o "$" nao tem significado especial.
+function shellQuote(f) {
+  return isWin ? '"' + f + '"' : '"' + f.replace(/(["\\$])/g, '\\$1') + '"';
+}
 function listFiles(dir, ext) {
   let out = [];
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -303,7 +308,7 @@ execSync(`${JAVAC} -encoding UTF-8 -source 1.8 -target 1.8 -bootclasspath ${ANDR
 
 // 8. Converte bytecode para classes.dex com D8 oficial do Build-Tools 33
 console.log("8. Gerando classes.dex com D8 oficial (min-api 21)...");
-const classFiles = listFiles(BIN_DIR, '.class').map(f => `"${f}"`).join(' ');
+const classFiles = listFiles(BIN_DIR, '.class').map(shellQuote).join(' ');
 const dexFile = path.join(BUILD_DIR, 'classes.dex');
 if (fs.existsSync(dexFile)) fs.unlinkSync(dexFile);
 execSync(`${JAVA} -cp ${D8_JAR} com.android.tools.r8.D8 --min-api 21 --lib ${ANDROID_JAR} --output "${BUILD_DIR}" ${classFiles}`, { stdio: 'inherit' });
