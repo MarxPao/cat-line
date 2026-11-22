@@ -29,6 +29,39 @@ COMO INSTALAR NO CELULAR ANDROID (3 PASSOS):
    - O ícone do Cat Line com a gatinha calico estará pronto na sua tela inicial!
    - Toque no ícone e aproveite todo o universo de hábitos, foco, mimos e agenda da sua gatinha!
 
+   *Se o Google Play Protect avisar sobre um app não reconhecido:* toque em "Mais detalhes" e depois em "Instalar mesmo assim".
+   Isso acontece porque o Cat Line não vem da loja do Google. O aplicativo funciona sem internet e não envia seus dados para lugar nenhum.
+
+-----------------------------------------------------------
+LIGAR O BLOQUEIO DE REDES SOCIAIS (SÓ UMA VEZ):
+-----------------------------------------------------------
+
+Para a gatinha trancar o Instagram, o TikTok e outros apps fora do Cat Line, o Android exige uma permissão especial de acessibilidade.
+O Cat Line usa essa permissão somente para saber qual app está aberto. Nenhum conteúdo de tela ou de mensagem sai do celular.
+
+No Cat Line, abra a aba "Mais", depois "Foco". Siga o cartão "Ative a Permissão de Bloqueio no Android", ou faça assim:
+
+1. Abra Configurações do Android > Acessibilidade > Apps instalados (ou "Serviços baixados") > Cat Line e ligue a chave.
+
+2. ANDROID 13 OU MAIS NOVO: o Android vai avisar "Configuração restrita" e a chave não liga. Isso é normal para apps instalados por arquivo.
+   - Toque em OK e volte.
+   - Abra Configurações > Apps > Cat Line (Info do app).
+   - Toque nos três pontinhos (⋮) no canto de cima e em "Permitir configurações restritas".
+   - Atenção: esse item só aparece depois que você tentou ligar a chave no passo 1.
+
+3. Volte à Acessibilidade e ligue a chave do Cat Line de novo.
+
+4. No Cat Line, toque em "Ver como a gatinha bloqueia" para conferir que a tela de bloqueio aparece.
+
+SE O BLOQUEIO PARAR DE FUNCIONAR DEPOIS DE ALGUM TEMPO:
+   - Alguns celulares (Xiaomi, Samsung, Oppo, Vivo, Huawei) pausam apps para economizar bateria.
+   - Em Configurações > Apps > Cat Line > Bateria, escolha "Sem restrições" e permita o início automático, se o seu celular tiver essa opção.
+   - A aba "Mais" mostra um aviso amarelo quando a bateria está restringindo o Cat Line.
+
+SEGURANÇA:
+   - O Telefone, as Chamadas de emergência, o WhatsApp e as Configurações do Android nunca são bloqueados.
+   - A Saída de Emergência libera o app depois de 10 segundos, caso você precise.
+
 ===========================================================
 🐱 Desenvolvido com amor para a cliente Cat Line!
 ===========================================================

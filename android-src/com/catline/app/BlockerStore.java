@@ -46,15 +46,27 @@ final class BlockerStore {
                 .apply();
     }
 
-    static JSONObject state(Context c) {
+    // O servico de acessibilidade recebe dezenas de eventos por segundo. Interpretar o JSON das regras a cada
+    // evento gastava CPU e bateria, entao o resultado fica guardado enquanto o texto salvo nao mudar.
+    private static String cachedRaw = null;
+    private static JSONObject cachedState = null;
+    private static JSONObject cachedDefault = null;
+
+    static synchronized JSONObject state(Context c) {
         String raw = prefs(c).getString(KEY_STATE, null);
         if (raw != null && !raw.isEmpty()) {
+            if (raw.equals(cachedRaw) && cachedState != null) return cachedState;
             try {
                 JSONObject o = new JSONObject(raw);
-                if (o.optJSONArray("rules") != null) return o;
+                if (o.optJSONArray("rules") != null) {
+                    cachedRaw = raw;
+                    cachedState = o;
+                    return o;
+                }
             } catch (JSONException ignored) {}
         }
-        return defaultState();
+        if (cachedDefault == null) cachedDefault = defaultState();
+        return cachedDefault;
     }
 
     private static JSONObject defaultState() {
@@ -195,8 +207,16 @@ final class BlockerStore {
         prefs(c).edit().putLong(KEY_CONNECTED_AT, SystemClock.elapsedRealtime()).apply();
     }
 
+    private static String lastSeenPkg = "";
+    private static long lastSeenWriteAt = 0L;
+
+    /** Registra o ultimo app visto para o diagnostico, no maximo uma gravacao a cada 5 segundos por app. */
     static void markSeen(Context c, String pkg) {
-        prefs(c).edit().putString(KEY_LAST_PKG, pkg).putLong(KEY_LAST_AT, SystemClock.elapsedRealtime()).apply();
+        long now = SystemClock.elapsedRealtime();
+        if (pkg.equals(lastSeenPkg) && now - lastSeenWriteAt < 5000L) return;
+        lastSeenPkg = pkg;
+        lastSeenWriteAt = now;
+        prefs(c).edit().putString(KEY_LAST_PKG, pkg).putLong(KEY_LAST_AT, now).apply();
     }
 
     static void markBlocked(Context c, String pkg) {

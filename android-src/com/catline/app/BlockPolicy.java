@@ -150,15 +150,28 @@ final class BlockPolicy {
         return false;
     }
 
+    // Consultar o PackageManager a cada evento e caro. Os nomes dos apps quase nunca mudam durante o uso.
+    private static final java.util.HashMap<String, String> LABEL_CACHE = new java.util.HashMap<String, String>();
+
     private static String getAppLabel(Context c, String pkg) {
+        synchronized (LABEL_CACHE) {
+            String cached = LABEL_CACHE.get(pkg);
+            if (cached != null) return cached;
+        }
+        String label = "";
         try {
             PackageManager pm = c.getPackageManager();
             ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
             CharSequence cs = pm.getApplicationLabel(ai);
-            return cs != null ? cs.toString() : "";
+            label = cs != null ? cs.toString() : "";
         } catch (Exception e) {
-            return "";
+            label = "";
         }
+        synchronized (LABEL_CACHE) {
+            if (LABEL_CACHE.size() > 400) LABEL_CACHE.clear();
+            LABEL_CACHE.put(pkg, label);
+        }
+        return label;
     }
 
     private static boolean inDays(JSONObject r) {

@@ -7419,33 +7419,48 @@ class AppUI {
     syncNativeBlocker();
     try { diag = JSON.parse(nb.diagnostics() || '{}'); } catch (e) {}
     const enabled = !!diag.serviceEnabled;
+    const needsRestrictedStep = Number(diag.sdk) >= 33;
     const fmt = (ms) => ms ? Clock.formatTime(ms) : 'nunca';
     const rulesHtml = (diag.rules || []).map(r => {
       const color = r.status === 'TRAVA AGORA' ? PALETTE.leafGreen : PALETTE.grayDark;
       const inst = r.installed ? '' : ' · <em>não instalado</em>';
-      return `<li><strong>${escHtml(r.name)}</strong>: <span style="color:${color}">${r.status}</span>${inst}</li>`;
+      return `<li><strong>${escHtml(r.name)}</strong>: <span style="color:${color}">${escHtml(r.status)}</span>${inst}</li>`;
     }).join('');
     const lastBlock = diag.lastBlock ? diag.lastBlock.split('@') : null;
     const diagHtml = `
         <details style="margin-top: 8px; font-size: 12px;">
           <summary style="cursor:pointer; font-weight:700;">🔎 Diagnóstico do Bloqueador no Celular</summary>
           <ul style="padding-left: 16px; margin-top: 4px;">
-            <li>Versão: ${diag.version || '?'} · Android SDK ${diag.sdk || '?'} · ${diag.device || ''}</li>
+            <li>Versão: ${escHtml(diag.version || '?')} · Android SDK ${escHtml(diag.sdk || '?')} · ${escHtml(diag.device || '')}</li>
             <li>Serviço ligado nas configurações: <strong>${enabled ? 'sim' : 'não'}</strong></li>
             <li>Serviço conectado pela última vez: ${fmt(diag.connectedAt)}</li>
-            <li>Último app detectado: ${diag.lastPkg || 'nenhum'} · ${fmt(diag.lastAt)}</li>
-            <li>Último bloqueio: ${lastBlock ? lastBlock[0] + ' · ' + fmt(Number(lastBlock[1])) : 'nenhum'}</li>
+            <li>Último app detectado: ${escHtml(diag.lastPkg || 'nenhum')} · ${fmt(diag.lastAt)}</li>
+            <li>Último bloqueio: ${lastBlock ? escHtml(lastBlock[0]) + ' · ' + fmt(Number(lastBlock[1])) : 'nenhum'}</li>
             <li>Regras sincronizadas: ${fmt(diag.syncAt)}</li>
           </ul>
           <ul style="padding-left: 16px;">${rulesHtml || '<li>Nenhuma regra</li>'}</ul>
           <button class="pixel-btn btn-sm" style="margin-top:4px;" onclick="window.app.refreshBlockerDiag()">🔄 Atualizar</button>
         </details>`;
-    const testBtn = IS_RELEASE ? '' : `<button class="pixel-btn btn-sm" onclick="window.app.testBlockScreen()">🧪 Testar tela de bloqueio</button>`;
+    // O teste existe também no APK de release: é ele que mostra à usuária que o bloqueio está funcionando.
+    const testBtn = `<button class="pixel-btn btn-sm btn-purple" onclick="window.app.testBlockScreen()">👀 Ver como a gatinha bloqueia</button>`;
+
+    // Em alguns celulares o Android pausa serviços para economizar bateria e o bloqueio para de funcionar sem aviso.
+    let batteryWarn = '';
+    const ns = this.getNotifStatus();
+    if (enabled && ns && !ns.batteryUnrestricted) {
+      batteryWarn = `
+        <div style="margin: 6px 0; padding: 6px 8px; border: 2px dashed #E0A800; background: #fff8e1; font-size: 12px; line-height: 1.35;">
+          ⚠️ O Android pode pausar o bloqueio para economizar bateria. ${escHtml(this.batteryHint(ns.manufacturer))}
+          <div style="margin-top: 4px;"><button class="pixel-btn btn-sm btn-purple" style="min-height: 36px;" onclick="window.app.notifFixBattery()">Liberar bateria</button></div>
+        </div>`;
+    }
+
     if (enabled) {
       return `
       <div class="pixel-card" style="border-left: 6px solid ${PALETTE.leafGreen};">
         <h4 style="margin-bottom: 4px;">✅ Bloqueio Nativo Android Ativo</h4>
         <p style="font-size: 13px; margin-bottom: 6px;">As redes com status <strong>TRAVA AGORA</strong> serão bloqueadas automaticamente ao tentar abri-las no celular.</p>
+        ${batteryWarn}
         <div class="flex-row" style="gap: 6px; flex-wrap: wrap; margin-bottom: 6px;">
           <button class="pixel-btn btn-sm btn-red" onclick="window.app.relockAllAppsNow()">🔒 Trancar Todas as Redes Agora</button>
           ${testBtn}
@@ -7453,17 +7468,20 @@ class AppUI {
         ${diagHtml}
       </div>`;
     }
+    const restrictedStep = needsRestrictedStep ? `
+          <li>Se o Android avisar <strong>Configuração restrita</strong>, toque em OK e volte. Depois toque em <strong>Info do app</strong>, em ⋮ no canto de cima e em <strong>Permitir configurações restritas</strong>. Esse item só aparece depois da tentativa do passo 1.</li>` : '';
     return `
       <div class="pixel-card" style="border-left: 6px solid #E06C75;">
         <h4 style="margin-bottom: 4px;">⚠️ Ative a Permissão de Bloqueio no Android</h4>
-        <p style="font-size: 13px; margin-bottom: 6px;">Para o celular cobrir o Instagram/TikTok fora do Cat Line, ligue o serviço em 2 passos:</p>
-        <ol style="font-size: 13px; padding-left: 18px; margin-bottom: 8px;">
-          <li>Toque em <strong>Ativar bloqueio</strong>, abra <strong>Apps instalados</strong> ou <strong>Serviços baixados</strong> e escolha <strong>Cat Line</strong>.</li>
-          <li>Ligue a chave. Se aparecer <strong>Configuração restrita</strong>, toque em <strong>Info do app</strong>, depois em ⋮ no canto superior e em <strong>Permitir configurações restritas</strong>. Depois repita o passo 1.</li>
+        <p style="font-size: 13px; margin-bottom: 6px;">Para o celular cobrir o Instagram e o TikTok fora do Cat Line, ligue o serviço em ${needsRestrictedStep ? '3' : '2'} passos. O Cat Line usa essa permissão só para saber qual app está aberto. Nenhum conteúdo sai do celular.</p>
+        <ol style="font-size: 13px; padding-left: 18px; margin-bottom: 8px; line-height: 1.4;">
+          <li>Toque em <strong>Ligar o serviço</strong>, abra <strong>Apps instalados</strong> ou <strong>Serviços baixados</strong>, escolha <strong>Cat Line</strong> e ligue a chave.</li>${restrictedStep}
+          <li>Repita o passo 1. Quando a chave ficar ligada, volte para cá. Esta tela se atualiza sozinha.</li>
         </ol>
         <div class="flex-row" style="gap: 6px; flex-wrap: wrap;">
-          <button class="pixel-btn btn-sm btn-green" onclick="window.app.openBlockerSettings()">Ativar bloqueio</button>
-          <button class="pixel-btn btn-sm" onclick="window.app.openBlockerAppInfo()">Info do app</button>
+          <button class="pixel-btn btn-sm btn-green" onclick="window.app.openBlockerSettings()">Ligar o serviço</button>
+          ${needsRestrictedStep ? '<button class="pixel-btn btn-sm" onclick="window.app.openBlockerAppInfo()">Info do app</button>' : ''}
+          ${testBtn}
         </div>
         ${diagHtml}
       </div>`;

@@ -32,7 +32,8 @@ const testScripts = [
   'test-phase24-ics-import.js',
   'test-phase25-single-file.js',
   'test-phase26-native-bridges.js',
-  'test-phase27-reminder-planner.js'
+  'test-phase27-reminder-planner.js',
+  'test-phase28-blocker-setup.js'
 ];
 
 console.log('🐾 [Cat Line] Executando suíte completa de testes automatizados...\n');

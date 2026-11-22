@@ -22,6 +22,13 @@ Todas as alterações notáveis do projeto Cat Line são documentadas neste arqu
 - Widget "Hoje" na tela inicial com os próximos 3 compromissos e botão "Feito", pelo mesmo caminho das notificações.
 - Compilado e assinado com o SDK 33 sem erros. Ainda não testado num aparelho.
 
+### 🔒 Bloqueador fora da Play Store
+- Cartão de ativação reescrito: no Android 13 ou mais novo mostra três passos na ordem que o sistema exige, incluindo "Permitir configurações restritas", que só aparece depois de tentar ligar o serviço. Em Android mais antigo mostra dois passos.
+- O botão "Ver como a gatinha bloqueia" agora existe também no APK de release. Antes ele sumia justamente onde a usuária precisa dele.
+- Aviso amarelo quando a economia de bateria pode pausar o bloqueio, com dica por fabricante.
+- Serviço de acessibilidade mais leve: as regras são interpretadas uma vez por mudança, o rótulo dos apps fica em cache, a gravação do diagnóstico é limitada e eventos repetidos do mesmo app em menos de 300 ms são ignorados. Antes, cada rolagem de tela refazia tudo isso.
+- Guia de instalação cobre o aviso do Play Protect, a configuração restrita e a bateria.
+
 ### 🔔 Avisos que chegam
 - Cada compromisso agora avisa na sua própria data. Antes, o app agendava tudo para o dia de hoje e só quando era aberto, então compromissos de outros dias, inclusive os importados de `.ics`, não avisavam no dia certo, e os de hoje só avisavam se o app fosse aberto naquele dia.
 - Os avisos são reagendados a cada salvamento, em até 7 dias, sem esperar o app voltar para a tela, e só o que mudou é reenviado ao Android.
