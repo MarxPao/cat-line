@@ -13033,6 +13033,32 @@ class AppUI {
     try { diag = JSON.parse(nb.diagnostics() || '{}'); } catch (e) {}
     const enabled = !!diag.serviceEnabled;
     const needsRestrictedStep = Number(diag.sdk) >= 33;
+    const canSelf = !!diag.canSelfEnable;
+    // Modo avançado: com a permissão dada por ADB o app liga o próprio serviço e pode religar se o Android desligar.
+    const autoHtml = (enabled && canSelf) ? `
+        <label style="display: flex; align-items: flex-start; gap: 8px; font-size: 12px; line-height: 1.35; margin: 6px 0; cursor: pointer;">
+          <input type="checkbox" ${diag.autoEnable ? 'checked' : ''} onchange="window.app.toggleBlockerAutoEnable(this.checked)" style="margin-top: 2px;">
+          <span>Religar o bloqueio sozinho se o Android desligar. Para desativar de vez, desmarque esta opção antes de desligar o serviço nas configurações.</span>
+        </label>` : '';
+    const advancedHtml = enabled ? '' : (canSelf ? `
+        <div style="margin: 8px 0; padding: 8px 10px; border: 2px solid ${PALETTE.leafGreen}; background: #eefaf0; font-size: 13px; line-height: 1.4;">
+          ⚡ Este celular já deu a permissão avançada. O Cat Line liga o serviço sozinho, sem passar pelas configurações restritas.
+          <div style="margin-top: 6px;"><button class="pixel-btn btn-sm btn-green" onclick="window.app.blockerSelfEnable()">⚡ Ligar agora</button></div>
+        </div>` : `
+        <details style="margin-top: 8px; font-size: 12px; line-height: 1.4;">
+          <summary style="cursor: pointer; font-weight: 700;">⚡ Modo avançado: ligar pelo computador</summary>
+          <p style="margin: 6px 0;">Pula as configurações restritas e deixa o Cat Line religar o bloqueio se o Android o desligar. Precisa de um computador com o ADB, uma única vez.</p>
+          <ol style="padding-left: 18px; margin: 4px 0;">
+            <li>No celular, abra Configurações, Sobre o telefone, e toque 7 vezes em Número da versão para liberar as Opções do desenvolvedor.</li>
+            <li>Nas Opções do desenvolvedor, ligue a Depuração USB. No Xiaomi, ligue também a depuração USB com configurações de segurança.</li>
+            <li>Conecte o cabo ao computador e autorize a depuração no celular.</li>
+            <li>No computador, rode este comando:
+              <code style="display: block; margin: 4px 0; padding: 6px; background: #181425; color: #FFF3B0; word-break: break-all; user-select: all;">adb shell pm grant com.catline.app android.permission.WRITE_SECURE_SETTINGS</code>
+            </li>
+            <li>Volte para cá e toque em Atualizar no diagnóstico. O botão Ligar agora aparece.</li>
+          </ol>
+          <p style="margin: 6px 0;">Essa permissão é poderosa. O Cat Line só a usa para ligar o próprio serviço de bloqueio e nunca mexe nos serviços de outros apps. Depois você pode desligar a Depuração USB.</p>
+        </details>`);
     const fmt = (ms) => ms ? Clock.formatTime(ms) : 'nunca';
     const rulesHtml = (diag.rules || []).map(r => {
       const color = r.status === 'TRAVA AGORA' ? PALETTE.leafGreen : PALETTE.grayDark;
@@ -13074,6 +13100,7 @@ class AppUI {
         <h4 style="margin-bottom: 4px;">✅ Bloqueio Nativo Android Ativo</h4>
         <p style="font-size: 13px; margin-bottom: 6px;">As redes com status <strong>TRAVA AGORA</strong> serão bloqueadas automaticamente ao tentar abri-las no celular.</p>
         ${batteryWarn}
+        ${autoHtml}
         <div class="flex-row" style="gap: 6px; flex-wrap: wrap; margin-bottom: 6px;">
           <button class="pixel-btn btn-sm btn-red" onclick="window.app.relockAllAppsNow()">🔒 Trancar Todas as Redes Agora</button>
           ${testBtn}
@@ -13096,8 +13123,32 @@ class AppUI {
           ${needsRestrictedStep ? '<button class="pixel-btn btn-sm" onclick="window.app.openBlockerAppInfo()">Info do app</button>' : ''}
           ${testBtn}
         </div>
+        ${advancedHtml}
         ${diagHtml}
       </div>`;
+  }
+
+  blockerSelfEnable() {
+    let res = 'error';
+    try { res = window.AndroidBlocker.selfEnableService(); } catch (e) {}
+    const msg = {
+      ok: 'Ligado! O bloqueio já está valendo.',
+      already: 'O bloqueio já estava ligado.',
+      no_permission: 'Falta a permissão avançada. Siga o modo avançado para liberar.',
+      error: 'Não consegui ligar agora. Tente pelo passo a passo.'
+    }[res] || 'Não consegui ligar agora. Tente pelo passo a passo.';
+    this.setCatSpeech(msg);
+    this.renderActiveTab();
+    // O Android leva um instante para registrar o serviço
+    setTimeout(() => { if (state.activeTab === 'foco' || state.activeTab === 'mais') this.renderActiveTab(); }, 1200);
+  }
+
+  toggleBlockerAutoEnable(checked) {
+    try { window.AndroidBlocker.setAutoEnable(!!checked); } catch (e) {}
+    this.setCatSpeech(checked
+      ? 'Combinado! Se o Android desligar o bloqueio, eu ligo de novo quando você abrir o app.'
+      : 'Tudo bem. Não vou religar o bloqueio sozinha.');
+    this.renderActiveTab();
   }
 
   refreshBlockerDiag() {

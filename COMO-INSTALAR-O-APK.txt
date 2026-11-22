@@ -53,6 +53,18 @@ No Cat Line, abra a aba "Mais", depois "Foco". Siga o cartão "Ative a Permissã
 
 4. No Cat Line, toque em "Ver como a gatinha bloqueia" para conferir que a tela de bloqueio aparece.
 
+MODO AVANÇADO, PELO COMPUTADOR (OPCIONAL, UMA ÚNICA VEZ):
+   Pula a configuração restrita e deixa o Cat Line religar o bloqueio se o Android o desligar.
+   1. No celular: Configurações > Sobre o telefone > toque 7 vezes em "Número da versão" para liberar as Opções do desenvolvedor.
+   2. Nas Opções do desenvolvedor, ligue a "Depuração USB". No Xiaomi, ligue também a depuração USB com configurações de segurança.
+   3. Conecte o cabo ao computador (que precisa ter o ADB instalado) e autorize a depuração no celular.
+   4. No computador, rode:
+        adb shell pm grant com.catline.app android.permission.WRITE_SECURE_SETTINGS
+   5. No Cat Line, aba Mais > Foco, toque em "Ligar agora".
+   Essa permissão é poderosa. O Cat Line só a usa para ligar o próprio serviço de bloqueio e nunca mexe nos serviços de outros apps.
+   Depois disso você pode desligar a Depuração USB.
+   A opção "Religar o bloqueio sozinho" é sua escolha e vem desmarcada. Para desativar o bloqueio de vez, desmarque essa opção antes.
+
 SE O BLOQUEIO PARAR DE FUNCIONAR DEPOIS DE ALGUM TEMPO:
    - Alguns celulares (Xiaomi, Samsung, Oppo, Vivo, Huawei) pausam apps para economizar bateria.
    - Em Configurações > Apps > Cat Line > Bateria, escolha "Sem restrições" e permita o início automático, se o seu celular tiver essa opção.

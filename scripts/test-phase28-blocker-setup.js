@@ -22,7 +22,7 @@ function slice(start, end) {
 }
 
 const escSrc = slice('function escHtml(value) {', "if (typeof window !== 'undefined') window.escHtml = escHtml;");
-const cardSrc = slice('  renderNativeBlockerCard() {', '  refreshBlockerDiag() {');
+const cardSrc = slice('  renderNativeBlockerCard() {', '  blockerSelfEnable() {');
 const batterySrc = slice('  batteryHint(manufacturer) {', '  notifFixNotifications()');
 
 function render({ diag, notif, bridge = true }) {

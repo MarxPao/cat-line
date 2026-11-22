@@ -61,6 +61,7 @@ public class ReminderReceiver extends BroadcastReceiver {
 
         } else if (Intent.ACTION_BOOT_COMPLETED.equals(action) || Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)) {
             Log.d(TAG, "Reboot ou atualizacao do app: reagendando avisos");
+            AccessibilityEnabler.healIfNeeded(context);
             NotificationHelper.rescheduleAll(context);
         }
     }

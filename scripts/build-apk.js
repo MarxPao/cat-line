@@ -92,6 +92,8 @@ const manifest = `<?xml version="1.0" encoding="utf-8"?>
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Nao e concedida na instalacao. So vale se a usuaria rodar pm grant por ADB, para o app ligar o proprio servico. -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
 
     <queries>
         <package android:name="com.instagram.android" />
@@ -237,6 +239,13 @@ public class MainActivity extends Activity {
         webView.addJavascriptInterface(new NotifyBridge(this), "AndroidNotify");
         webView.loadUrl("file:///android_asset/index.html");
         setContentView(webView);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Se a usuaria pediu e o aparelho deu a permissao avancada, religa o bloqueio caso o Android o tenha desligado
+        AccessibilityEnabler.healIfNeeded(this);
     }
 
     @Override

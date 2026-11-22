@@ -77,16 +77,30 @@ public class BlockerBridge {
 
     @JavascriptInterface
     public boolean isServiceEnabled() {
-        String enabled = Settings.Secure.getString(ctx.getContentResolver(),
-                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-        if (enabled == null) return false;
-        ComponentName cn = new ComponentName(ctx, BlockerService.class);
-        String full = cn.flattenToString();
-        String shortName = cn.flattenToShortString();
-        for (String s : enabled.split(":")) {
-            if (s.equalsIgnoreCase(full) || s.equalsIgnoreCase(shortName)) return true;
-        }
-        return false;
+        return AccessibilityEnabler.isEnabled(ctx);
+    }
+
+    /** Verdadeiro se o aparelho recebeu a permissao avancada por ADB e o app pode ligar o proprio servico. */
+    @JavascriptInterface
+    public boolean canSelfEnable() {
+        return AccessibilityEnabler.canSelfEnable(ctx);
+    }
+
+    /** Liga o servico direto. Resultado: ok, already, no_permission ou error. */
+    @JavascriptInterface
+    public String selfEnableService() {
+        return AccessibilityEnabler.enable(ctx);
+    }
+
+    @JavascriptInterface
+    public void setAutoEnable(boolean enabled) {
+        BlockerStore.setAutoEnable(ctx, enabled);
+        if (enabled) AccessibilityEnabler.healIfNeeded(ctx);
+    }
+
+    @JavascriptInterface
+    public boolean isAutoEnable() {
+        return BlockerStore.isAutoEnable(ctx);
     }
 
     @JavascriptInterface
@@ -110,6 +124,8 @@ public class BlockerBridge {
         try {
             org.json.JSONObject o = BlockerStore.diagnostics(ctx);
             o.put("serviceEnabled", isServiceEnabled());
+            o.put("canSelfEnable", AccessibilityEnabler.canSelfEnable(ctx));
+            o.put("autoEnable", BlockerStore.isAutoEnable(ctx));
             o.put("sdk", android.os.Build.VERSION.SDK_INT);
             o.put("device", android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL);
             try {

@@ -18,6 +18,7 @@ final class BlockerStore {
     private static final String KEY_CONNECTED_AT = "connected_at";
     private static final String KEY_LAST_BLOCK = "last_block";
     private static final String KEY_SYNC_AT = "sync_at";
+    private static final String KEY_AUTO_ENABLE = "auto_enable";
 
     // Chaves do Banco de Minutos e Módulo Foco (Fase 5)
     private static final String KEY_MINUTE_BANK_BALANCE_SEC = "minute_bank_balance_sec";
@@ -128,6 +129,15 @@ final class BlockerStore {
             }
         }
         ed.apply();
+    }
+
+    // Religar o servico sozinho: so vale se a usuaria ligou a opcao no app. Padrao desligado.
+    static void setAutoEnable(Context c, boolean enabled) {
+        prefs(c).edit().putBoolean(KEY_AUTO_ENABLE, enabled).apply();
+    }
+
+    static boolean isAutoEnable(Context c) {
+        return prefs(c).getBoolean(KEY_AUTO_ENABLE, false);
     }
 
     // Métodos do Banco de Minutos e Módulo Foco (Fase 5)

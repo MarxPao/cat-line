@@ -28,6 +28,8 @@ Todas as alterações notáveis do projeto Cat Line são documentadas neste arqu
 - Aviso amarelo quando a economia de bateria pode pausar o bloqueio, com dica por fabricante.
 - Serviço de acessibilidade mais leve: as regras são interpretadas uma vez por mudança, o rótulo dos apps fica em cache, a gravação do diagnóstico é limitada e eventos repetidos do mesmo app em menos de 300 ms são ignorados. Antes, cada rolagem de tela refazia tudo isso.
 - Guia de instalação cobre o aviso do Play Protect, a configuração restrita e a bateria.
+- Modo avançado por ADB: depois de um único comando no computador, `adb shell pm grant com.catline.app android.permission.WRITE_SECURE_SETTINGS`, o botão "Ligar agora" liga o serviço sem passar pelas configurações restritas. O app só acrescenta o próprio serviço à lista de acessibilidade e nunca apaga os de outros apps, como o TalkBack.
+- Opção "Religar o bloqueio sozinho se o Android desligar", desmarcada por padrão, que age ao abrir o app, ao reiniciar e depois de atualizar. Respeita o módulo Foco desligado e o modo descanso.
 
 ### 🔔 Avisos que chegam
 - Cada compromisso agora avisa na sua própria data. Antes, o app agendava tudo para o dia de hoje e só quando era aberto, então compromissos de outros dias, inclusive os importados de `.ics`, não avisavam no dia certo, e os de hoje só avisavam se o app fosse aberto naquele dia.
